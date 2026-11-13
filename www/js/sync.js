@@ -30,16 +30,27 @@ export async function accessToken() {
 
 const meta = () => (S.state.syncMeta ||= { lastSynced: null, dirty: false });
 
+/** A book as other devices see it: its card and counts. The PDF, page data and unsaved review items stay on the device that read it. */
+const slimBook = (b) => ({ id: b.id, title: b.title, author: b.author, kind: b.kind, pages: b.pages, cover: b.cover, collectionId: b.collectionId, createdAt: b.createdAt, finishedAt: b.finishedAt, saved: b.saved || 0, waiting: b.cloud ? b.waiting || 0 : b.session?.items?.length || 0, status: "done" });
 function cloudCopy() {
   const out = {};
   for (const [k, v] of Object.entries(S.state)) if (!LOCAL_ONLY.includes(k) && k !== "syncMeta") out[k] = v;
   out.settings = { ...S.state.settings, apiKey: "" };
+  out.bookShelf = (S.state.books || []).map(slimBook);
   return out;
 }
 function applyRemote(remote) {
   const keep = { settings: S.state.settings, syncMeta: S.state.syncMeta };
   for (const k of LOCAL_ONLY) keep[k] = S.state[k];
+  // Books: this device's own books stay as they are; books read on other devices appear as shelf entries.
+  const gone = new Set([...(remote.deletedBooks || []), ...(S.state.deletedBooks || [])]);
+  const mine = (S.state.books || []).filter((b) => !b.cloud && !gone.has(b.id));
+  const have = new Set(mine.map((b) => b.id));
+  const others = (remote.bookShelf || []).filter((b) => !have.has(b.id) && !gone.has(b.id)).map((b) => ({ ...b, cloud: true, fileIds: [], chunks: [], session: { items: [], problems: "" }, usage: { input: 0, output: 0, cost: 0 }, from: 1, to: b.pages }));
+  keep.books = [...mine, ...others];
+  keep.deletedBooks = [...gone];
   Object.assign(S.state, remote, keep);
+  delete S.state.bookShelf;
   ensureMeals();
   S.state.settings = { ...remote.settings, apiKey: keep.settings.apiKey, model: keep.settings.model || remote.settings?.model };
 }
@@ -56,13 +67,18 @@ function merge(remote) {
     merged[key] = [...byId.values()];
   }
   merged.prefs = { ...remote.prefs, ...S.state.prefs };
+  merged.deletedBooks = [...new Set([...(remote.deletedBooks || []), ...(S.state.deletedBooks || [])])];
   return merged;
 }
+
+/** For tests: what goes to the cloud and how a cloud copy is applied. */
+export const _internals = { cloudCopy, applyRemote, merge };
 
 export async function initSync() {
   hooks.afterSave = schedulePush;
   hooks.cloudReady = () => !!sync.user && S.state.settings.cloudAI !== false;
   hooks.cloudToken = accessToken;
+  hooks.signedIn = () => !!sync.user;
   try {
     const c = await client();
     const { data } = await c.auth.getSession();
@@ -71,6 +87,8 @@ export async function initSync() {
     if (sync.user) await pull();
     document.addEventListener("visibilitychange", () => { if (!document.hidden && sync.user) pull(); });
     window.addEventListener("online", () => { if (sync.user) pull(); });
+    // Changes made on another device show up here within a minute, without reloading.
+    setInterval(() => { if (sync.user && !document.hidden && navigator.onLine && sync.status !== "syncing" && !meta().dirty) pull(); }, 45000);
   } catch (e) { sync.status = "error"; sync.error = e.message; }
   emit();
 }

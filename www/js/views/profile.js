@@ -54,7 +54,8 @@ export function viewOnboarding() {
           <button class="btn btn-primary btn-lg">${h(ob.step === n - 1 ? t("start_using") : t("continue"))} ${icon("arrow-right")}</button></div>
         </div>
       </form>
-      ${ob.step === 0 ? `<p class="meta center"><button class="btn-link" data-act="ob-finish">${h(t("skip_setup"))}</button></p>` : ""}
+      ${ob.step === 0 ? `<p class="meta center"><button class="btn-link" data-act="ob-finish">${h(t("skip_setup"))}</button></p>
+        <p class="meta center"><button class="btn-link ob-signin" data-act="ob-signin">${icon("cloud")} ${h(t("ob_have_account"))}</button></p>` : ""}
       </div>
     </div>
   </div>`;
@@ -83,6 +84,8 @@ export const onboardActions = {
   "ob-back": (_, rr) => { ob.step = Math.max(0, ob.step - 1); rr(); },
   "ob-skip": (_, rr) => { ob.step++; rr(); },
   "ob-finish": () => finishOnboarding(),
+  // A second device: skip the set-up and go straight to signing in, so the library arrives from the cloud.
+  "ob-signin": () => { S.state.onboarded = true; save(); go("#/profile"); },
 };
 
 /* ---------- starter recipes ---------- */

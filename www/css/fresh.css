@@ -212,3 +212,6 @@ a { color: var(--t-accent); }
 .price-row[hidden] { display: none; }
 .price-row input { min-height: 38px; text-align: right; }
 .price-row small { color: var(--t-secondary); }
+.sync-cta { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin: 0 0 16px; border-radius: var(--r-xl); background: var(--c-warning-subtle); color: var(--t-primary); text-decoration: none; border: 1px solid var(--line-strong); }
+.sync-cta span { flex: 1; } .sync-cta strong { display: block; } .sync-cta small { color: var(--t-secondary); font-size: 14px; }
+.ob-signin { display: inline-block; margin-top: 14px; font-weight: 600; }

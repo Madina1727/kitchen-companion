@@ -421,8 +421,8 @@ function bookCard(b) {
   return `<a class="book-card" href="#/book/${b.id}">
     <div class="book-cover">${b.cover ? `<img src="${h(b.cover)}" alt="">` : icon("book", "ic-xl")}</div>
     <div class="book-body"><h3>${h(b.title)}</h3>${b.author ? `<p class="meta">${h(b.author)}</p>` : ""}
-      <p class="meta">${h(t("n_pages", { n: b.pages }))} · ${h(t("book_found_saved", { f: b.session.items.length + (b.saved || 0), s: b.saved || 0 }))}</p>
-      ${statusText(b)}</div>
+      <p class="meta">${h(t("n_pages", { n: b.pages }))} · ${h(t("book_found_saved", { f: (b.cloud ? b.waiting || 0 : b.session.items.length) + (b.saved || 0), s: b.saved || 0 }))}</p>
+      ${b.cloud ? `<span class="status st-green">${icon("cloud")} ${h(t("book_other_device"))}</span>` : statusText(b)}</div>
   </a>`;
 }
 
@@ -500,6 +500,17 @@ const money = (n) => (n < 0.01 ? "<$0.01" : "$" + (n < 10 ? n.toFixed(2) : n.toF
 export function viewBook(id) {
   const b = bookById(id);
   if (!b) return `<div class="page"><div class="empty"><p>${h(t("book_not_found"))}</p><a class="btn" href="#/books">${h(t("recipe_books"))}</a></div></div>`;
+  if (b.cloud) {
+    // Read on another device: its recipes are here, the PDF itself stayed there.
+    return `<div class="page page-narrow"><a class="back" href="#/books">${icon("chevron-left")} ${h(t("recipe_books"))}</a>
+      <header class="book-head"><div class="book-cover book-cover-lg">${b.cover ? `<img src="${h(b.cover)}" alt="">` : icon("book", "ic-xl")}</div>
+        <div><p class="eyebrow">${h(t("recipe_book"))}</p><h1>${h(b.title)}</h1>
+          <p class="lead">${[b.author, t("n_pages", { n: b.pages })].filter(Boolean).map(h).join(" · ")}</p>
+          <span class="status st-green">${icon("cloud")} ${h(t("book_other_device"))}</span></div></header>
+      <section class="panel"><p>${h(t("book_other_device_text", { n: b.saved || 0 }))}</p>
+        <div class="row wrap"><a class="btn btn-primary" href="#/recipes" data-act="lib-open-coll" data-v="${h(b.collectionId || "all")}">${icon("book-open")} ${h(t("book_open_recipes", { n: b.saved || 0 }))}</a>
+        <button class="btn btn-danger-ghost" data-act="book-delete" data-id="${b.id}">${icon("trash-2")} ${h(t("delete_book"))}</button></div></section></div>`;
+  }
   if (b.status === "running" && !isRunning(b.id)) b.status = "paused";
   if (b.status === "fixing" && !isRunning(b.id)) b.status = "done";
   const aiOk = aiAvailable();
@@ -658,6 +669,7 @@ export const bookActions = {
     for (const fid of b.fileIds) { await fileDel(fid).catch(() => {}); }
     S.state.files = S.state.files.filter((f) => !b.fileIds.includes(f.id));
     S.state.books = books().filter((x) => x.id !== b.id);
+    (S.state.deletedBooks ||= []).push(b.id); // so it also disappears from the shelf on other devices
     pdfCache.delete(b.id);
     save(); go("#/books");
   },

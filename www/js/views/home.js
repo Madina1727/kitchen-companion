@@ -1,5 +1,5 @@
 // Home ("What can I cook today?") and the full recommendations screen.
-import { S, t, h, icon, iname, minutes, go, todayISO, recipeById, catLabel, catIcon, qty, save, toast, uid, aiAvailable, mealsOf, guessMeals, openSheet, refreshIcons, planMeals, slotFit, addDays, dateLabel } from "../core.js";
+import { S, t, h, icon, iname, minutes, go, todayISO, recipeById, catLabel, catIcon, qty, save, toast, uid, aiAvailable, hooks, mealsOf, guessMeals, openSheet, refreshIcons, planMeals, slotFit, addDays, dateLabel } from "../core.js";
 import { matchAll, matchRecipe, expiryStatus, ingCategory, exclusionsFor } from "../engine.js";
 import { suggestFromKitchen, aiErrorKey } from "../ai.js";
 import { recipeCard, recipeRow, ctx, emptyLibrary, RECIPE_CATS, recipeCover, mealChips, availabilityLine } from "./recipes.js";
@@ -44,6 +44,7 @@ export function viewHome() {
       <a class="filter-btn" href="#/discover" aria-label="${h(t("recommendations"))}">${icon("sliders-horizontal")}</a>
     </form>
 
+    ${hooks.signedIn && !hooks.signedIn() ? `<a class="sync-cta" href="#/profile">${icon("cloud-off")}<span><strong>${h(t("sync_cta"))}</strong><small>${h(t("sync_cta_sub"))}</small></span>${icon("chevron-right")}</a>` : ""}
     <section class="hero-dark">
       <div class="hero-text">
         <p class="eyebrow">${h(t("ready_tonight_eyebrow"))}</p>
