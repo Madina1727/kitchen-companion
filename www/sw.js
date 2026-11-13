@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Network first for HTML/JS so updates show up, cache as fallback.
-const CACHE = "kc-v6";
-const SHELL = ["./", "index.html", "css/app.css", "css/design.css", "js/app.js", "js/core.js", "js/db.js", "js/i18n.js", "js/catalog.js", "js/engine.js", "js/parser.js", "js/ai.js",
+const CACHE = "kc-v7";
+const SHELL = ["./", "index.html", "css/app.css", "css/design.css", "css/vibrant.css", "js/app.js", "js/core.js", "js/db.js", "js/i18n.js", "js/catalog.js", "js/engine.js", "js/parser.js", "js/ai.js",
   "js/views/home.js", "js/views/recipes.js", "js/views/importer.js", "js/views/kitchen.js", "js/views/cook.js", "js/views/plan.js", "js/views/profile.js", "js/views/books.js", "js/sync.js",
   "vendor/lucide.min.js", "icons/icon.svg", "manifest.webmanifest"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting())); });

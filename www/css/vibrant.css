@@ -1,0 +1,118 @@
+/* Vibrant, appetite-friendly palette: tomato, paprika, saffron, basil, berry on warm cream.
+   Loaded after design.css; remove this file from index.html to go back to the calm palette. */
+:root, :root[data-theme="light"] {
+  --c-canvas: #FFF8EF; --c-surface: #FFFFFF; --c-sunken: #FFEEDB; --c-inverse: #2B1610;
+  --c-accent: #D83A1F; --c-accent-strong: #B12A12; --c-accent-subtle: #FFE1D6;
+  --c-success: #16804A; --c-success-subtle: #DCF5E5; --c-warning-subtle: #FFEDB8; --c-partial: #F29A0E;
+  --t-primary: #2B1610; --t-secondary: #6E4A3C; --t-accent: #C9331A; --t-accent-strong: #A3260F; --t-success: #11703F; --t-warning: #8A4B00;
+  --t-on-inverse: #FFF8EF; --t-on-inverse-muted: #F3D9CC;
+  --b-default: #F6DCC6; --b-strong: #2B1610; --line-strong: #EEC9AE;
+  --c-feature: #2B1610;
+  /* food colours */
+  --f-tomato: #E63B1F; --f-paprika: #F26A1B; --f-saffron: #FFB21E; --f-basil: #11763F; --f-berry: #D61F69; --f-plum: #7B2D8B; --f-teal: #0F8A8A;
+  --g-hero: linear-gradient(135deg, #E8431F 0%, #D6262F 55%, #B8124A 100%);
+  --g-basil: linear-gradient(135deg, #179C55 0%, #0E7A44 100%);
+  --g-saffron: linear-gradient(135deg, #FFC52E 0%, #FF9A1F 100%);
+  --g-berry: linear-gradient(135deg, #E0306F 0%, #A0195A 100%);
+  --shadow: 0 1px 2px rgba(120, 40, 10, .06), 0 10px 26px rgba(200, 70, 20, .10);
+  --shadow-float: 0 12px 32px rgba(200, 60, 20, .18), 0 2px 6px rgba(120, 40, 10, .08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-canvas: #1C110D; --c-surface: #2A1A14; --c-sunken: #36221A; --c-inverse: #FFF1E4;
+    --c-accent: #D83A1F; --c-accent-strong: #A8280F; --c-accent-subtle: #4D2016; --c-success-subtle: #173826; --c-warning-subtle: #45300F; --c-partial: #F29A0E;
+    --t-primary: #FFF4EA; --t-secondary: #E9C9B8; --t-accent: #FF8A65; --t-accent-strong: #FFA184; --t-success: #6FDA9C; --t-warning: #FFC861;
+    --t-on-inverse: #2B1610; --t-on-inverse-muted: #6E4A3C; --b-default: #4E3024; --line-strong: #6A4231; --c-feature: #2A1A14;
+  }
+}
+:root[data-theme="dark"] {
+  --c-canvas: #1C110D; --c-surface: #2A1A14; --c-sunken: #36221A; --c-inverse: #FFF1E4;
+  --c-accent: #D83A1F; --c-accent-strong: #A8280F; --c-accent-subtle: #4D2016; --c-success-subtle: #173826; --c-warning-subtle: #45300F; --c-partial: #F29A0E;
+  --t-primary: #FFF4EA; --t-secondary: #E9C9B8; --t-accent: #FF8A65; --t-accent-strong: #FFA184; --t-success: #6FDA9C; --t-warning: #FFC861;
+  --t-on-inverse: #2B1610; --t-on-inverse-muted: #6E4A3C; --b-default: #4E3024; --line-strong: #6A4231; --c-feature: #2A1A14;
+}
+
+/* ---------- energetic surfaces ---------- */
+.hero-dark { background: var(--g-hero); color: #fff; position: relative; overflow: hidden; box-shadow: var(--shadow-float); }
+.hero-dark::after { content: ""; position: absolute; right: -60px; top: -60px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 210, 60, .45), transparent 70%); pointer-events: none; }
+.hero-dark .eyebrow, .hero-dark .meta { color: #FFE9DE; }
+.hero-dark h2 { color: #fff; }
+.hero-dark .btn-primary { background: #FFC52E; border-color: #FFC52E; color: #2B1610; }
+.hero-dark .btn-primary:hover { background: #FFD45C; border-color: #FFD45C; }
+.hero-dark .btn:not(.btn-primary) { border-color: rgba(255, 255, 255, .55); color: #fff; }
+.kit-banner { background: var(--g-basil); color: #fff; box-shadow: var(--shadow); }
+.kit-banner small { color: #E4FFF0; }
+.kit-banner .btn-primary { background: #FFC52E; border-color: #FFC52E; color: #2B1610; }
+.list-summary { background: var(--g-saffron); color: #2B1610; box-shadow: var(--shadow); }
+.list-summary .eyebrow, .list-summary p { color: #5A2E10; }
+.list-summary .bar { background: rgba(43, 22, 16, .15); }
+.list-summary .bar span { background: #2B1610; }
+.imp-book { background: var(--g-berry); }
+.imp-book small { color: #FFE3EE; }
+.dark-card { background: var(--g-hero); }
+
+/* bottom bar + nav active: tomato */
+.bn-link.on, .side-link.on { background: var(--c-accent); color: #fff; }
+.day-btn.on { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.day-btn.on small { color: #FFFFFF; }
+.day-btn.on .dots i { background: #FFC52E; }
+.choice input:checked + span, .lang-tile input:checked + span { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.lang-tile input:checked + span small { color: #FFFFFF; }
+.msg-user .bubble { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.circle-btn.dark, .btn-dark, .search-wrap .filter-btn { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.fab { background: var(--g-hero); }
+.btn-primary { box-shadow: 0 4px 14px rgba(216, 58, 31, .28); }
+.brand-mark { background: var(--g-hero); }
+.avatar { background: var(--g-saffron); color: #2B1610; }
+.count-badge { background: var(--f-basil); }
+
+/* colourful category covers for recipes without a photo */
+.cover-type { position: relative; overflow: hidden; }
+.cover-type span { color: rgba(255, 255, 255, .95); opacity: 1; font-style: italic; text-shadow: 0 2px 12px rgba(0, 0, 0, .15); z-index: 1; }
+.cover-type::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 80% 15%, rgba(255, 255, 255, .28), transparent 45%), radial-gradient(circle at 10% 90%, rgba(0, 0, 0, .12), transparent 50%); }
+.tint-0 { background: linear-gradient(135deg, #FFC52E, #FF8A1F); }   /* breakfast: saffron */
+.tint-1 { background: linear-gradient(135deg, #2DB36A, #12804A); }   /* lunch: basil */
+.tint-2 { background: linear-gradient(135deg, #F0532A, #C8211F); }   /* dinner: tomato */
+.tint-3 { background: linear-gradient(135deg, #F04A8C, #B4166A); }   /* dessert: berry */
+.tint-4 { background: linear-gradient(135deg, #FF8A3D, #E85A12); }   /* snack: paprika */
+.tint-5 { background: linear-gradient(135deg, #22B5B0, #0D7F86); }   /* drink: teal */
+.tint-6 { background: linear-gradient(135deg, #B65BD0, #7B2D8B); }   /* other: plum */
+
+/* chips & tags a little brighter */
+.chip.on, .tab.on { background: var(--c-accent); border-color: var(--c-accent); box-shadow: 0 3px 10px rgba(216, 58, 31, .25); }
+.chip .ic { color: var(--f-paprika); }
+.match-badge { color: #fff; background: var(--f-basil); }
+.match-badge.partial { color: #2B1610; background: #FFC52E; }
+.match-badge.miss { color: #fff; background: var(--c-accent); }
+.bar span { background: var(--f-basil); }
+.bar.partial span { background: linear-gradient(90deg, #FFB21E, #F26A1B); }
+.fav-mark .ic.filled { fill: var(--f-berry); color: var(--f-berry); }
+.ic.fav-on { fill: var(--f-berry); color: var(--f-berry); }
+
+/* ingredient tiles and add tiles get food colours */
+.ing-icon { background: #FFE8D2; color: var(--f-paprika); }
+.add-tile.t-red { background: linear-gradient(135deg, #FFE1D6, #FFD0BF); }
+.add-tile.t-amber { background: linear-gradient(135deg, #FFF1C4, #FFE29A); }
+.add-tile.t-green { background: linear-gradient(135deg, #DCF5E5, #C2EDD3); }
+.add-tile.t-dark { background: linear-gradient(135deg, #FBE0EE, #F5C6DE); color: #8A1048; }
+.tile .ic, .imp-opt .ic, .menu-item .ic { color: var(--f-paprika); }
+.steps li::before { background: var(--c-accent); color: #fff; }
+.step-n { background: var(--c-accent-subtle); color: var(--t-accent-strong); }
+.cook-segs span.on { background: linear-gradient(90deg, #FFB21E, #E63B1F); }
+.ob-art { background: var(--g-saffron); }
+.ob-art .mark { background: var(--g-hero); box-shadow: 0 10px 30px rgba(200, 40, 20, .35); }
+.ob-art .ring { border-color: rgba(255, 255, 255, .55); }
+.ideas-panel { border: 0; background: linear-gradient(180deg, #FFF3E6, #FFFFFF 60%); box-shadow: var(--shadow); }
+.ideas-head h2 .ic { color: var(--f-berry); }
+.people .seg button.on { background: var(--c-accent); color: #fff; }
+.pantry-card, .rcard, .rrow, .panel, .add-card, .idea { box-shadow: var(--shadow); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ideas-panel { background: var(--c-surface); }
+  :root:not([data-theme="light"]) .ing-icon { background: #3E2418; }
+  :root:not([data-theme="light"]) .add-tile { filter: saturate(1.1) brightness(.9); }
+}
+:root[data-theme="dark"] .ideas-panel { background: var(--c-surface); }
+:root[data-theme="dark"] .ing-icon { background: #3E2418; }
+.add-tile.t-red { color: #A3260F; } .add-tile.t-amber { color: #7A4300; } .add-tile.t-green { color: #0E6B39; }
+a { color: var(--t-accent); }

@@ -5,7 +5,7 @@ const files = ["js/" , "js/views/"].flatMap((d) => readdirSync("www/" + d).filte
 const map = { imports: Object.fromEntries(files.map((f) => [f, `${f}?v=${v}`])) };
 let html = readFileSync("www/index.html", "utf8");
 html = html.replace(/\s*<script type="importmap">[\s\S]*?<\/script>/, "");
-html = html.replace(/(href="css\/(?:app|design)\.css)(\?v=\d+)?"/g, `$1?v=${v}"`);
+html = html.replace(/(href="css\/(?:app|design|vibrant)\.css)(\?v=\d+)?"/g, `$1?v=${v}"`);
 html = html.replace(/<script type="module" src="js\/app\.js(\?v=\d+)?"><\/script>/, `<script type="importmap">${JSON.stringify(map)}</script>\n  <script type="module" src="js/app.js?v=${v}"></script>`);
 writeFileSync("www/index.html", html);
 console.log("stamped", v, files.length, "modules");
