@@ -1,7 +1,7 @@
 // Cloud sync with Supabase: one private row per user (RLS: only the owner can read or write it).
 // Recipes, kitchen, plans, lists and preferences sync. Uploaded book files, import drafts and the
 // device's own Claude key stay on the device.
-import { S, save, saveNow, toast, t, hooks } from "./core.js";
+import { S, save, saveNow, toast, t, hooks, ensureMeals } from "./core.js";
 
 export const SUPABASE_URL = "https://illefcbzekeplwjlrgin.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RZxu7ZbTMN4HI1gxkn7lpg__3Y-koLE"; // publishable key, safe in the browser
@@ -40,6 +40,7 @@ function applyRemote(remote) {
   const keep = { settings: S.state.settings, syncMeta: S.state.syncMeta };
   for (const k of LOCAL_ONLY) keep[k] = S.state[k];
   Object.assign(S.state, remote, keep);
+  ensureMeals();
   S.state.settings = { ...remote.settings, apiKey: keep.settings.apiKey, model: keep.settings.model || remote.settings?.model };
 }
 const stamp = (x) => x?.updatedAt || x?.createdAt || "";

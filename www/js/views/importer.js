@@ -1,14 +1,15 @@
 // Recipe import center: social links, websites, PDF/DOC/DOCX, images, pasted text.
 // Every extracted recipe goes through a review step before it is saved.
 import { S, t, h, icon, save, toast, go, uid, fileToBase64, openSheet, iname, refreshIcons, confirmDialog, aiAvailable, hooks } from "../core.js";
-import { extractPdf, extractDocx, extractDoc, findRecipes, classifyUrl, recipeFromHtml, detectLang, pdfPageCount } from "../parser.js";
-import { createBook } from "./books.js";
+import { extractPdf, extractDocx, extractDoc, findRecipes, attachPdfPhotos, latinizeRecipe, classifyUrl, recipeFromHtml, detectLang, pdfPageCount } from "../parser.js";
+import { createBook, startBook } from "./books.js";
 import { extractWithAI, aiErrorKey } from "../ai.js";
 import { fileSet } from "../db.js";
-import { norm } from "../engine.js";
+import { norm, guessMeals, estimateEffort, guessDish, guessCuisine } from "../engine.js";
 import { blankRecipe, editorForm, bindEditor, readEditor, validRecipe, finalizeRecipe } from "./recipes.js";
 
-const MAX_FILE_MB = 30;
+const MAX_FILE_MB = 200;
+const MAX_AI_FILE_MB = 30; // larger files cannot be sent to Claude in one piece; the built-in reader takes them
 const ui = { mode: null, busy: false, status: "", error: "" };
 
 const aiReady = () => aiAvailable();
@@ -214,13 +215,14 @@ async function runImport(form, rr) {
           const buf = await file.arrayBuffer();
           let parsed = null;
           try { parsed = await extractPdf(buf.slice(0)); meta.pages = parsed.pageCount; } catch { notes.push(t("pdf_unreadable", { f: file.name })); }
-          if (useAI) {
+          if (useAI && file.size <= MAX_AI_FILE_MB * 1024 * 1024) {
             setStatus(t("extracting_file", { f: file.name }));
             const r = await extractWithAI(S.state.settings, { kind: "pdf", base64: await fileToBase64(file) });
             found = r.recipes; if (r.problems) notes.push(file.name + ": " + r.problems);
           } else if (parsed) {
             if (parsed.scanned) notes.push(t("pdf_scanned", { f: file.name }));
-            found = findRecipes(parsed.pages);
+            found = findRecipes(parsed.pages, { title: file.name.replace(/\.pdf$/i, "") });
+            await attachPdfPhotos(buf.slice(0), found);
           }
         } else if (type === "docx" || type === "doc") {
           const buf = await file.arrayBuffer();
@@ -267,16 +269,24 @@ async function runImport(form, rr) {
 
 /** Turn an extracted recipe into a review item (draft + flags). */
 export function makeItem(r, source) {
+  latinizeRecipe(r); // Uzbek written in Cyrillic is saved in the Latin alphabet
   const src = r._src ? { ...r._src, page: r.sourcePage ?? null } : { ...source, page: r.sourcePage ?? null };
   const d = {
     ...blankRecipe(), title: r.title || "", description: r.description || "", servings: r.servings ?? null,
-    prepTime: r.prepTime ?? null, cookTime: r.cookTime ?? null, cuisine: r.cuisine || "", category: r.category || "dinner",
+    prepTime: r.prepTime ?? null, cookTime: r.cookTime ?? null, cuisine: r.cuisine || "", category: r.category || "",
     difficulty: "", image: r.image && r.image.startsWith("data:") ? r.image : "", imageUrl: r.image && !r.image.startsWith("data:") ? r.image : "",
     ingredients: r.ingredients || [], steps: r.steps || [], source: src,
     language: r.language || detectLang([r.title, ...(r.ingredients || []).map((i) => i.name), ...(r.steps || []).map((s) => s.text)].join(" ")),
   };
-  if (r.url && !src.url) d.source.url = r.url;
   if (r.tags?.length) d.tags = r.tags;
+  if (r.notes) d.notes = r.notes;
+  d.meals = Array.isArray(r.meals) && r.meals.length ? r.meals : guessMeals(d, r.hints || []);
+  d.category = d.meals[0];
+  estimateEffort(d);
+  if (r.kcal != null) { d.kcal = r.kcal; d.protein = r.protein ?? null; d.nutritionEst = !!r.nutritionEst; }
+  d.dish = r.dish || guessDish(d);
+  d.cuisine = guessCuisine(d) || d.cuisine;
+  if (r.url && !src.url) d.source.url = r.url;
   const dupOf = findDuplicate(d);
   const item = { id: uid(), draft: d, include: !!(d.title && d.ingredients.length) && !dupOf && !r.notRecipe, confidence: r.confidence, dupOf };
   if (r.notRecipe) item.notRecipe = true;
@@ -403,6 +413,34 @@ export function viewReviewEdit(k) {
     ${editorForm(d, "", base + "/review", { inSheet: true })}
     <div class="row-end sticky-actions"><button class="btn" data-back-review>${h(t("back"))}</button><button class="btn btn-primary" form="editor">${icon("check")} ${h(t("confirm_recipe"))}</button></div>
   </div>`;
+}
+
+/**
+ * Adds a book that sits in the local "inbox" folder next to the app: creates it under Recipe books,
+ * reads it with the built-in reader and saves every complete recipe. Returns the book.
+ */
+export async function importInboxBook(fileName) {
+  const known = (S.state.books || []).find((b) => b.fileName === fileName);
+  if (known) return known;
+  const res = await fetch("inbox/" + encodeURIComponent(fileName), { cache: "no-store" });
+  if (!res.ok) throw new Error(t("file_missing"));
+  const file = new File([await res.blob()], fileName, { type: "application/pdf" });
+  const book = await createBook({ files: [file], title: fileName.replace(/\.pdf$/i, "") });
+  if (!book.hasText) return book;          // needs Claude to read page images: leave it for the person to start
+  book.mode = "local";
+  await startBook(book.id);
+  const keep = book.session.items.filter((i) => i.include && !validRecipe(i.draft));
+  for (const it of keep) {
+    const d = finalizeRecipe(structuredClone(it.draft));
+    d.id = uid(); d.createdAt = new Date().toISOString();
+    d.collections = [...new Set([...(d.collections || []), book.collectionId])];
+    d.source = { ...d.source, type: "book", bookId: book.id, bookTitle: book.title };
+    S.state.recipes.unshift(d);
+  }
+  book.session.items = book.session.items.filter((i) => !keep.includes(i));
+  book.saved = (book.saved || 0) + keep.length;
+  save();
+  return book;
 }
 
 function saveSelected() {

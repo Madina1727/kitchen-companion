@@ -1,7 +1,8 @@
 // My Recipes: library, detail, editor, collections.
 import {
   S, t, h, icon, save, toast, openSheet, confirmDialog, qty, minutes, recipeById, go, uid, lang,
-  ingredientDatalist, resizeImage, unitLabel, catLabel, iname, dateLabel, todayISO, refreshIcons,
+  ingredientDatalist, resizeImage, unitLabel, catLabel, iname, dateLabel, todayISO, refreshIcons, mealsOf, mealsLabel, guessMeals, planMeals, slotFit, addDays,
+  factsOf, won, cuisineLabel, dishLabel, DISH_TYPES, CUISINES, cuisineId, guessDish,
 } from "../core.js";
 import { matchRecipe, resolveIngredient, UNIT_LIST, norm, registerCustomName } from "../engine.js";
 import { BY_ID } from "../catalog.js";
@@ -17,9 +18,23 @@ export function ctx(servings) {
 }
 
 /* ---------- card ---------- */
+/** "Soup · Uzbek" */
+export const kindLine = (r) => [dishLabel(r.dish), cuisineLabel(r.cuisine)].filter(Boolean).join(" · ");
+/** "≈ 540 kcal · 32 g protein · ≈ ₩3,200" per portion (or for the whole recipe when it does not say how many it serves). */
+export function factsLine(r) {
+  const f = factsOf(r);
+  const v = f.hasServings ? f.perServing : f.total;
+  const parts = [];
+  if (v.kcal != null) parts.push(`${f.est ? "≈ " : ""}${Math.round(v.kcal)} ${t("kcal")}`);
+  if (v.protein != null) parts.push(`${Math.round(v.protein)} ${t("g_protein")}`);
+  if (v.cost != null) parts.push(`≈ ${won(v.cost)}`);
+  return parts.length ? parts.join(" · ") + " " + t(f.hasServings ? "per_portion_short" : "whole_recipe_short") : "";
+}
+/** Coloured meal-type labels, one per type, so the type is the first thing read on a card. */
+export const mealChips = (r) => `<p class="meal-tags">${mealsOf(r).map((m) => `<span class="meal-tag mt-${m}">${h(catLabel(m))}</span>`).join("")}</p>`;
 export function recipeCover(r, cls = "") {
   if (r.image) return `<div class="cover ${cls}"><img src="${h(r.image)}" alt="" loading="lazy"></div>`;
-  const tint = ["breakfast", "lunch", "dinner", "dessert", "snack", "drink"].indexOf(r.category);
+  const tint = ["breakfast", "lunch", "dinner", "dessert", "snack", "drink"].indexOf(mealsOf(r)[0]);
   return `<div class="cover cover-type tint-${tint < 0 ? 6 : tint} ${cls}" aria-hidden="true"><span>${h((r.title || "?").trim().charAt(0).toUpperCase())}</span></div>`;
 }
 export function availabilityLine(m) {
@@ -59,12 +74,15 @@ export function recipeCard(r, { match, compact = false } = {}) {
   const m = match ?? matchRecipe(r, ctx());
   const ml = matchLabel(m);
   const time = recipeTime(r);
-  const sub = r.source?.type && !["manual", "sample"].includes(r.source.type) ? t("from_src", { x: t("src_" + r.source.type) }) : r.difficulty ? t("diff_" + r.difficulty) : r.category ? catLabel(r.category) : "";
+  const sub = r.source?.type && !["manual", "sample"].includes(r.source.type) ? t("from_src", { x: t("src_" + r.source.type) }) : r.difficulty ? t("diff_" + r.difficulty) : "";
   return `<div class="rcard-wrap"><a class="rcard" href="#/recipe/${r.id}">
     <div class="badge-wrap">${recipeCover(r)}${ml ? `<span class="match-badge ${ml.cls}">${h(ml.text)}</span>` : ""}</div>
     <div class="rcard-body">
+      ${mealChips(r)}
       <h3>${h(r.title)}</h3>
-      <p class="meta">${time ? icon("clock") + " " + h(minutes(time)) : ""}${time && sub ? " · " : ""}${h(sub)}</p>
+      <p class="meta effort">${time ? `<span>${icon("clock")} ${r.timeEst ? "≈ " : ""}${h(minutes(time))}</span>` : ""}${r.difficulty ? `<span class="diff diff-${r.difficulty}">${icon("gauge")} ${h(t("diff_" + r.difficulty))}</span>` : ""}</p>
+      ${kindLine(r) ? `<p class="meta kind">${h(kindLine(r))}</p>` : ""}
+      ${factsLine(r) ? `<p class="meta nutri-line">${h(factsLine(r))}</p>` : ""}
       ${m.bucket !== "ready" ? verdict(m) : ""}
     </div>
     <span class="fav-mark" aria-hidden="true">${icon("heart", r.favorite ? "filled" : "")}</span>
@@ -77,6 +95,7 @@ export function recipeRow(r, { match, extra = "" } = {}) {
   return `<a class="rrow" href="#/recipe/${r.id}">
     ${recipeCover(r)}
     <div class="rrow-body">
+      ${mealChips(r)}
       <h3>${h(r.title)}</h3>
       <p class="meta">${[time ? minutes(time) : "", m.bucket !== "blocked" ? t("pct_match", { n: pct }) : "", extra].filter(Boolean).map(h).join(" · ")}</p>
       ${m.bucket !== "blocked" ? `<div class="bar ${pct === 100 ? "" : "partial"}"><span style="width:${pct}%"></span></div>` : ""}
@@ -86,18 +105,31 @@ export function recipeRow(r, { match, extra = "" } = {}) {
 }
 
 /* ---------- library ---------- */
-const lib = { q: "", cat: "all", coll: "all", sort: "recent", view: "grid", time: 0, diff: "", limit: 60 };
+const lib = { q: "", cat: "all", coll: "all", sort: "recent", view: "grid", time: 0, diff: "", dish: "", cuisine: "", limit: 60 };
 export function viewRecipes() {
   const st = S.state;
   let list = st.recipes.slice();
   const q = norm(lib.q);
   if (q) list = list.filter((r) => norm(r.title).includes(q) || r.ingredients.some((i) => norm(i.name).includes(q) || norm(iname(i)).includes(q) || (i.ingredientId && i.ingredientId === resolveIngredient(lib.q))) || (r.tags || []).some((tg) => norm(tg).includes(q)) || norm(r.cuisine).includes(q));
-  if (lib.cat !== "all") list = list.filter((r) => r.category === lib.cat);
+  // Counts per meal type are taken before the type filter, so the chips show what each one holds.
+  const typeBase = (() => {
+    let l = list;
+    if (lib.coll === "fav") l = l.filter((r) => r.favorite);
+    else if (lib.coll === "imported") l = l.filter((r) => r.source?.type && !["manual", "sample"].includes(r.source.type));
+    else if (lib.coll !== "all") l = l.filter((r) => (r.collections || []).includes(lib.coll));
+    return l;
+  })();
+  const typeCount = Object.fromEntries(RECIPE_CATS.map((c) => [c, typeBase.filter((r) => mealsOf(r).includes(c)).length]));
+  if (lib.cat !== "all") list = list.filter((r) => mealsOf(r).includes(lib.cat));
   if (lib.coll === "fav") list = list.filter((r) => r.favorite);
   else if (lib.coll === "imported") list = list.filter((r) => r.source?.type && !["manual", "sample"].includes(r.source.type));
   else if (lib.coll !== "all" && lib.coll !== "imported") list = list.filter((r) => (r.collections || []).includes(lib.coll));
   if (lib.time) list = list.filter((r) => ((r.prepTime || 0) + (r.cookTime || 0)) <= lib.time && (r.prepTime || r.cookTime));
   if (lib.diff) list = list.filter((r) => r.difficulty === lib.diff);
+  const dishCount = {}, cuisineCount = {};
+  for (const r of list) { if (r.dish) dishCount[r.dish] = (dishCount[r.dish] || 0) + 1; if (r.cuisine) cuisineCount[r.cuisine] = (cuisineCount[r.cuisine] || 0) + 1; }
+  if (lib.dish) list = list.filter((r) => r.dish === lib.dish);
+  if (lib.cuisine) list = list.filter((r) => r.cuisine === lib.cuisine);
   const sorters = {
     recent: (a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""),
     az: (a, b) => a.title.localeCompare(b.title, lang()),
@@ -109,8 +141,13 @@ export function viewRecipes() {
   if (lib.sort === "match") list.sort((a, b) => m(b).score - m(a).score);
   else list.sort(sorters[lib.sort]);
   const totalCount = list.length;
-  list = list.slice(0, lib.limit);
-  list.forEach(m);
+  // With no type chosen and no search, the library is laid out in sections: Breakfast, Lunch, Dinner, …
+  const sectioned = lib.cat === "all" && !q && !lib.dish && !lib.cuisine && totalCount > 0;
+  const perSection = lib.view === "grid" ? (window.innerWidth >= 900 ? 6 : 4) : 6;
+  const sections = sectioned ? RECIPE_CATS.map((c) => ({ c, all: list.filter((r) => mealsOf(r).includes(c)) })).filter((x) => x.all.length) : [];
+  if (sectioned) sections.forEach((x) => x.all.slice(0, perSection).forEach(m));
+  else { list = list.slice(0, lib.limit); list.forEach(m); }
+  const cards = (rs) => `<div class="${lib.view === "grid" ? "grid-cards" : "list-cards"}">${rs.map((r) => recipeCard(r, { match: matches.get(r.id), compact: lib.view === "list" })).join("")}</div>`;
 
   const collTabs = [["all", t("all_recipes")], ["fav", t("favorites")], ...st.collections.map((c) => [c.id, c.name])];
   const imported = st.recipes.filter((r) => r.source?.type && !["manual", "sample"].includes(r.source.type)).length;
@@ -140,12 +177,19 @@ export function viewRecipes() {
       ${st.collections.map((c) => `<button role="tab" class="chip ${lib.coll === c.id ? "on" : ""}" data-act="lib-coll" data-v="${h(c.id)}">${c.bookId ? icon("library") : ""}${h(c.name)}</button>`).join("")}
       <button class="chip" data-act="coll-new">${icon("folder-plus")} ${h(t("new_collection"))}</button>
     </div>
+    ${st.recipes.length ? `<div class="chips type-chips" role="group" aria-label="${h(t("meal_types"))}">
+      <button class="chip ${lib.cat === "all" ? "on" : ""}" data-act="lib-type" data-v="all" aria-pressed="${lib.cat === "all"}">${h(t("all_types"))}</button>
+      ${RECIPE_CATS.filter((c) => typeCount[c]).map((c) => `<button class="chip ${lib.cat === c ? "on" : ""}" data-act="lib-type" data-v="${c}" aria-pressed="${lib.cat === c}">${h(catLabel(c))} <small>${typeCount[c]}</small></button>`).join("")}
+    </div>` : ""}
     <div class="search-wrap" style="margin-bottom:12px">
       <label class="search">${icon("search")}<input type="search" id="lib-q" placeholder="${h(t("search_recipes_ph"))}" value="${h(lib.q)}" aria-label="${h(t("search"))}"></label>
       <button class="filter-btn" data-act="lib-filters" aria-expanded="${lib.showFilters}" aria-label="${h(t("filter"))}">${icon("sliders-horizontal")}</button>
     </div>
-    <div class="toolbar" ${lib.showFilters || lib.cat !== "all" || lib.time || lib.diff ? "" : "hidden"}>
-      <select id="lib-cat" aria-label="${h(t("category"))}"><option value="all">${h(t("all_categories"))}</option>${RECIPE_CATS.map((c) => `<option value="${c}" ${lib.cat === c ? "selected" : ""}>${h(catLabel(c))}</option>`).join("")}</select>
+    ${st.recipes.length ? `<div class="filter-row">
+      <select id="lib-dish" aria-label="${h(t("dish_type"))}"><option value="">${h(t("all_dishes"))}</option>${DISH_TYPES.filter((d) => dishCount[d] || lib.dish === d).map((d) => `<option value="${d}" ${lib.dish === d ? "selected" : ""}>${h(dishLabel(d))} (${dishCount[d] || 0})</option>`).join("")}</select>
+      <select id="lib-cuisine" aria-label="${h(t("cuisine"))}"><option value="">${h(t("all_cuisines"))}</option>${Object.keys(cuisineCount).sort((a, b) => cuisineCount[b] - cuisineCount[a]).slice(0, 40).map((c) => `<option value="${h(c)}" ${lib.cuisine === c ? "selected" : ""}>${h(cuisineLabel(c))} (${cuisineCount[c]})</option>`).join("")}</select>
+    </div>` : ""}
+    <div class="toolbar" ${lib.showFilters || lib.time || lib.diff ? "" : "hidden"}>
       <select id="lib-time" aria-label="${h(t("cooking_time"))}"><option value="0">${h(t("any_time"))}</option>${[15, 30, 60].map((n) => `<option value="${n}" ${lib.time == n ? "selected" : ""}>${h(t("under_min", { n }))}</option>`).join("")}</select>
       <select id="lib-diff" aria-label="${h(t("difficulty"))}"><option value="">${h(t("any_difficulty"))}</option>${["easy", "medium", "hard"].map((d) => `<option value="${d}" ${lib.diff === d ? "selected" : ""}>${h(t("diff_" + d))}</option>`).join("")}</select>
       <select id="lib-sort" aria-label="${h(t("sort"))}">${["recent", "az", "time", "match"].map((s) => `<option value="${s}" ${lib.sort === s ? "selected" : ""}>${h(t("sort_" + s))}</option>`).join("")}</select>
@@ -155,7 +199,11 @@ export function viewRecipes() {
       </div>
     </div>
     ${st.recipes.length === 0 ? emptyLibrary() : list.length === 0 ? `<div class="empty"><p>${h(t("no_results"))}</p></div>` :
-      `<p class="count">${h(t("n_recipes", { n: totalCount }))}</p><div class="${lib.view === "grid" ? "grid-cards" : "list-cards"}">${list.map((r) => recipeCard(r, { match: matches.get(r.id), compact: lib.view === "list" })).join("")}</div>
+      sectioned ? `<p class="count">${h(t("n_recipes", { n: totalCount }))}</p>${sections.map((x) => `<section class="meal-sec">
+        <div class="sec-head meal-head"><h2>${h(catLabel(x.c))} <small>${x.all.length}</small></h2>${x.all.length > perSection ? `<button class="btn-link" data-act="lib-type" data-v="${x.c}">${h(t("see_all_n", { n: x.all.length }))} ${icon("chevron-right")}</button>` : ""}</div>
+        ${cards(x.all.slice(0, perSection))}
+      </section>`).join("")}` :
+      `<p class="count">${h(t("n_recipes", { n: totalCount }))}</p>${cards(list)}
       ${totalCount > list.length ? `<div class="row center more-row"><button class="btn" data-act="lib-more">${h(t("show_more_n", { n: Math.min(60, totalCount - list.length), t: totalCount - list.length }))}</button></div>` : ""}`}
     ${!["all", "fav", "imported"].includes(lib.coll) ? `<div class="row-end"><button class="btn-link danger" data-act="coll-del" data-id="${h(lib.coll)}">${icon("trash-2")} ${h(t("delete_collection"))}</button></div>` : ""}
   </div>`;
@@ -175,7 +223,7 @@ export function emptyLibrary() {
 export function bindRecipes(root, rerender) {
   const q = root.querySelector("#lib-q");
   if (q) q.addEventListener("input", () => { lib.q = q.value; lib.limit = 60; rerender({ keepFocus: "#lib-q" }); });
-  for (const [id, key] of [["#lib-cat", "cat"], ["#lib-time", "time"], ["#lib-diff", "diff"], ["#lib-sort", "sort"]]) {
+  for (const [id, key] of [["#lib-cat", "cat"], ["#lib-time", "time"], ["#lib-diff", "diff"], ["#lib-sort", "sort"], ["#lib-dish", "dish"], ["#lib-cuisine", "cuisine"]]) {
     root.querySelector(id)?.addEventListener("change", (e) => { lib[key] = key === "time" ? +e.target.value : e.target.value; rerender(); });
   }
 }
@@ -184,6 +232,7 @@ export const recipeActions = {
   "lib-more": (_, rr) => { lib.limit += 60; rr(); },
   "lib-filters": (_, rr) => { lib.showFilters = !lib.showFilters; rr(); },
   "lib-view": (el, rr) => { lib.view = el.dataset.v; rr(); },
+  "lib-type": (el) => { lib.cat = el.dataset.v; lib.limit = 60; if (el.closest(".meal-head")) window.scrollTo({ top: 0 }); },
   "lib-open-coll": (el) => { lib.coll = el.dataset.v; lib.cat = "all"; lib.q = ""; },
   "coll-new": (_, rr) => newCollection(rr),
   "coll-del": async (el, rr) => {
@@ -214,7 +263,9 @@ const detailState = { servings: {}, langView: {} };
 export function viewRecipe(id) {
   const r = recipeById(id);
   if (!r) return `<div class="page"><div class="empty"><p>${h(t("recipe_not_found"))}</p><a class="btn" href="#/recipes">${h(t("back"))}</a></div></div>`;
-  const servings = detailState.servings[id] || r.servings || null;
+  // Cook for the number of people chosen last time (kept as the household size), when the recipe says how many it makes.
+  const servings = detailState.servings[id] || (r.servings ? S.state.prefs.people || r.servings : null);
+  const facts = factsOf(r, servings);
   const m = matchRecipe(r, ctx(servings));
   const scale = servings && r.servings ? servings / r.servings : 1;
   const view = detailState.langView[id] || "original";
@@ -252,21 +303,36 @@ export function viewRecipe(id) {
       </div>
       ${(r.photos || []).length > 1 ? `<div class="gallery">${r.photos.map((src) => `<button class="gal-th ${src === r.image ? "on" : ""}" data-act="gal-show" data-id="${r.id}" data-src="${h(src)}"><img src="${h(src)}" alt=""></button>`).join("")}</div>` : ""}
       <div class="detail-sheet">
-        <p class="eyebrow accent">${[r.category ? catLabel(r.category) : "", r.cuisine].filter(Boolean).map(h).join(" · ")}</p>
+        <p class="eyebrow accent">${[mealsLabel(r), dishLabel(r.dish), cuisineLabel(r.cuisine)].filter(Boolean).map(h).join(" · ")}</p>
         <div class="detail-title"><h1>${h(title)}</h1>${r.cookedCount ? `<span class="pill pill-amber">${icon("chef-hat")} ${h(t("cooked_n", { n: r.cookedCount }))}</span>` : ""}</div>
         ${srcLabel ? `<p class="src-line">${icon(SOURCE_ICON[src.type] || "pencil")} ${src.url ? `<a href="${h(src.url)}" target="_blank" rel="noopener noreferrer">${h(srcLabel)}</a>` : h(srcLabel)}${src.page ? " · " + h(t("page_n", { n: src.page })) : ""}</p>` : ""}
         ${(tr?.description || r.description) ? `<p class="lead">${h(tr?.description || r.description)}</p>` : ""}
         <div class="meta-pills">
           ${r.prepTime || r.cookTime ? `<span class="meta-pill">${icon("clock")} ${h(minutes((r.prepTime || 0) + (r.cookTime || 0)))}</span>` : ""}
           ${r.difficulty ? `<span class="meta-pill">${icon("flame")} ${h(t("diff_" + r.difficulty))}</span>` : ""}
-          ${r.servings ? `<span class="meta-pill stepper-pill"><button data-act="serv" data-id="${r.id}" data-d="-1" aria-label="${h(t("fewer"))}">${icon("minus")}</button>${icon("user")} ${h(t("n_servings", { n: servings }))}<button data-act="serv" data-id="${r.id}" data-d="1" aria-label="${h(t("more"))}">${icon("plus")}</button></span>` : ""}
         </div>
+        <section class="people-box">
+          <div class="people-row">
+            <strong>${icon("users")} ${h(t("cooking_for"))}</strong>
+            ${r.servings ? `<span class="stepper-pill big"><button data-act="serv" data-id="${r.id}" data-d="-1" aria-label="${h(t("fewer"))}">${icon("minus")}</button><b>${h(t("n_people", { n: servings }))}</b><button data-act="serv" data-id="${r.id}" data-d="1" aria-label="${h(t("more"))}">${icon("plus")}</button></span>`
+              : `<button class="btn btn-sm" data-act="set-servings" data-id="${r.id}">${h(t("set_portions"))}</button>`}
+          </div>
+          ${r.servings && scale !== 1 ? `<p class="meta">${h(t("scaled_from", { n: r.servings }))}</p>` : ""}
+          ${!r.servings ? `<p class="meta">${h(t("portions_unknown_help"))}</p>` : ""}
+          ${facts.total.kcal != null || facts.total.cost != null ? `<div class="fact-tiles">
+            ${facts.perServing.kcal != null ? `<div><small>${h(t("kcal_per_portion"))}</small><b>${facts.est ? "≈ " : ""}${Math.round(facts.perServing.kcal)}</b></div>` : ""}
+            ${facts.perServing.protein != null ? `<div><small>${h(t("protein_per_portion"))}</small><b>${facts.est ? "≈ " : ""}${Math.round(facts.perServing.protein)} g</b></div>` : ""}
+            ${facts.perServing.cost != null ? `<div><small>${h(t("cost_per_portion"))}</small><b>≈ ${won(facts.perServing.cost)}</b></div>` : ""}
+            ${facts.total.kcal != null ? `<div class="wide"><small>${h(facts.hasServings ? t("total_for_n", { n: servings }) : t("whole_recipe"))}</small><b>${facts.est ? "≈ " : ""}${Math.round(facts.total.kcal).toLocaleString("en-US")} ${h(t("kcal"))} · ${Math.round(facts.total.protein ?? 0)} ${h(t("g_protein"))}${facts.total.cost != null ? " · ≈ " + won(facts.total.cost) : ""}</b></div>` : facts.total.cost != null ? `<div class="wide"><small>${h(facts.hasServings ? t("total_for_n", { n: servings }) : t("whole_recipe"))}</small><b>≈ ${won(facts.total.cost)}</b></div>` : ""}
+          </div><p class="meta">${h(t(facts.est ? "facts_est_note" : "facts_stated_note"))}</p>` : ""}
+        </section>
         ${r.nutrition ? `<p class="eyebrow">${h(t("nutrition"))}</p><p>${h(r.nutrition)}</p>` : ""}
         <div class="row wrap detail-more">
           <button class="chip" data-act="coll-pick" data-id="${r.id}">${icon("folder")} ${h(t("collections"))}</button>
           <a class="chip" href="#/assistant?recipe=${r.id}">${icon("sparkle")} ${h(t("ask_ai_chef"))}</a>
           <button class="chip" data-act="translate" data-id="${r.id}">${icon("languages")} ${h(t("translate"))}</button>
           <a class="chip" href="#/recipe/${r.id}/edit">${icon("pencil")} ${h(t("edit"))}</a>
+          <button class="chip ${r.noSuggest ? "on" : ""}" data-act="no-suggest" data-id="${r.id}" aria-pressed="${!!r.noSuggest}">${icon(r.noSuggest ? "eye-off" : "eye")} ${h(t(r.noSuggest ? "not_suggested" : "dont_suggest"))}</button>
         </div>
         ${coll.length ? `<p class="meta">${icon("folder")} ${coll.map((c) => h(c.name)).join(", ")}</p>` : ""}
 
@@ -331,9 +397,18 @@ export const detailActions = {
     const r = recipeById(el.dataset.id);
     const cur = detailState.servings[r.id] || r.servings;
     detailState.servings[r.id] = Math.max(1, Math.min(50, cur + +el.dataset.d));
+    S.state.prefs.people = detailState.servings[r.id]; save(); // remembered as the household size for other recipes
     rr();
   },
   "lang-view": (el, rr) => { detailState.langView[el.dataset.id] = el.dataset.v; rr(); },
+  "set-servings": (el, rr) => {
+    const r = recipeById(el.dataset.id);
+    openSheet(t("set_portions"), `<form class="form" id="serv-form"><p class="lead">${h(t("portions_q"))}</p>
+      <label class="field"><span>${h(t("servings"))}</span><input name="n" inputmode="numeric" value="2" required></label>
+      <div class="row-end"><button class="btn btn-primary">${h(t("save"))}</button></div></form>`, {
+      onMount: (sheet, close) => sheet.querySelector("form").onsubmit = (e) => { e.preventDefault(); const n = parseInt(e.target.n.value); if (n > 0) { r.servings = n; save(); } close(); rr(); },
+    });
+  },
   "del-recipe": async (el) => {
     const r = recipeById(el.dataset.id);
     if (!(await confirmDialog(t("delete_recipe_q", { x: r.title }), { danger: true, ok: t("delete") }))) return;
@@ -362,6 +437,7 @@ export const detailActions = {
     save(); toast(t("added_to_list_n", { n }), "info", { label: t("view"), fn: () => go("#/grocery") });
   },
   translate: (el, rr) => translateSheet(recipeById(el.dataset.id), rr),
+  "no-suggest": (el, rr) => { const r = recipeById(el.dataset.id); r.noSuggest = !r.noSuggest; save(); rr(); toast(t(r.noSuggest ? "wont_suggest" : "will_suggest", { x: r.title })); },
   "open-file": async (el) => {
     const f = await fileGet(el.dataset.id);
     if (!f) return toast(t("file_missing"), "error");
@@ -412,7 +488,7 @@ function translateSheet(r, rr) {
 
 /* ---------- editor ---------- */
 export function blankRecipe() {
-  return { id: uid(), title: "", description: "", image: "", category: "dinner", cuisine: "", difficulty: "easy", prepTime: null, cookTime: null, servings: 2, tags: [], notes: "", ingredients: [], steps: [], source: { type: "manual" }, favorite: false, collections: [], createdAt: new Date().toISOString(), translations: {} };
+  return { id: uid(), title: "", description: "", image: "", category: "dinner", meals: ["dinner"], cuisine: "", difficulty: "easy", prepTime: null, cookTime: null, servings: 2, tags: [], notes: "", ingredients: [], steps: [], source: { type: "manual" }, favorite: false, collections: [], createdAt: new Date().toISOString(), translations: {} };
 }
 let draft = null;
 export function viewEditor(id) {
@@ -480,9 +556,13 @@ export function editorForm(d, heading, backHref, { inSheet = false } = {}) {
             <label class="field"><span>${h(t("servings"))}</span><input name="servings" inputmode="numeric" value="${d.servings ?? ""}"></label>
             <label class="field"><span>${h(t("difficulty"))}</span><select name="difficulty"><option value="">—</option>${["easy", "medium", "hard"].map((x) => `<option value="${x}" ${d.difficulty === x ? "selected" : ""}>${h(t("diff_" + x))}</option>`).join("")}</select></label>
           </div>
+          <fieldset class="field meal-field"><legend>${h(t("meal_types"))}</legend>
+            <div class="choices">${RECIPE_CATS.map((c) => `<label class="choice"><input type="checkbox" name="meals" value="${c}" ${mealsOf(d).includes(c) ? "checked" : ""}><span>${h(catLabel(c))}</span></label>`).join("")}</div>
+            <p class="meta">${h(t("meal_types_hint"))}</p>
+          </fieldset>
           <div class="grid-3">
-            <label class="field"><span>${h(t("category"))}</span><select name="category">${RECIPE_CATS.map((c) => `<option value="${c}" ${d.category === c ? "selected" : ""}>${h(catLabel(c))}</option>`).join("")}</select></label>
-            <label class="field"><span>${h(t("cuisine"))}</span><input name="cuisine" value="${h(d.cuisine || "")}" placeholder="${h(t("cuisine_ph"))}"></label>
+            <label class="field"><span>${h(t("dish_type"))}</span><select name="dish">${DISH_TYPES.map((x) => `<option value="${x}" ${(d.dish || guessDish(d)) === x ? "selected" : ""}>${h(dishLabel(x))}</option>`).join("")}</select></label>
+            <label class="field"><span>${h(t("cuisine"))}</span><input name="cuisine" list="cuisine-list" value="${h(cuisineLabel(d.cuisine))}" placeholder="${h(t("cuisine_ph"))}"><datalist id="cuisine-list">${CUISINES.map((c) => `<option value="${h(cuisineLabel(c))}">`).join("")}</datalist></label>
             <label class="field"><span>${h(t("tags"))}</span><input name="tags" value="${h((d.tags || []).join(", "))}" placeholder="${h(t("tags_ph"))}"></label>
           </div>
         </div>
@@ -507,6 +587,10 @@ export function editorForm(d, heading, backHref, { inSheet = false } = {}) {
       <fieldset class="ed-sec">
         <legend>${h(t("more"))}</legend>
         <label class="field"><span>${h(t("notes"))}</span><textarea name="notes" rows="3">${h(d.notes || "")}</textarea></label>
+        <div class="grid-2">
+          <label class="field"><span>${h(t("kcal_per_portion"))}</span><input name="kcal" inputmode="numeric" value="${d.kcal ?? ""}" placeholder="${h(t("auto_from_ingredients"))}"></label>
+          <label class="field"><span>${h(t("protein_per_portion"))}</span><input name="protein" inputmode="numeric" value="${d.protein ?? ""}" placeholder="${h(t("auto_from_ingredients"))}"></label>
+        </div>
         <label class="field"><span>${h(t("nutrition"))}</span><input name="nutrition" value="${h(d.nutrition || "")}" placeholder="${h(t("nutrition_ph"))}"></label>
         <label class="field"><span>${h(t("source_link"))}</span><input name="url" type="url" value="${h(d.source?.url || "")}" placeholder="https://"></label>
       </fieldset>
@@ -524,9 +608,16 @@ export function readEditor(form, d) {
   const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return isNaN(n) ? null : n; };
   d.prepTime = num(f.prepTime.value); d.cookTime = num(f.cookTime.value);
   d.servings = num(f.servings.value); d.difficulty = f.difficulty.value;
-  d.category = f.category.value; d.cuisine = f.cuisine.value.trim();
+  d.timeEst = false; d.difficultyEst = false; // what the person typed is no longer an estimate
+  const picked = [...form.querySelectorAll('input[name="meals"]:checked')].map((x) => x.value);
+  d.meals = picked.length ? picked : guessMeals({ ...d, meals: null, category: "" });
+  d.category = d.meals[0]; d.cuisine = cuisineId(f.cuisine.value) || f.cuisine.value.trim();
   d.tags = f.tags.value.split(",").map((x) => x.trim()).filter(Boolean);
   d.notes = f.notes.value.trim(); d.nutrition = f.nutrition.value.trim();
+  d.dish = f.dish.value;
+  const kc = num(f.kcal.value), pr = num(f.protein.value);
+  if (kc !== (d.kcal ?? null) || pr !== (d.protein ?? null)) d.nutritionEst = false; // typed by hand
+  d.kcal = kc; d.protein = pr;
   const url = f.url.value.trim();
   d.source = { ...(d.source || { type: "manual" }), url: url || d.source?.url || "" };
   if (!url) delete d.source.url;
@@ -637,14 +728,19 @@ export function addToPlanSheet(recipe, after) {
     <p class="lead">${h(recipe.title)}</p>
     <div class="grid-3">
       <label class="field"><span>${h(t("date"))}</span><input type="date" name="date" value="${today}" required></label>
-      <label class="field"><span>${h(t("meal"))}</span><select name="meal">${["breakfast", "lunch", "dinner"].map((m) => `<option value="${m}" ${m === (recipe.category === "breakfast" ? "breakfast" : recipe.category === "lunch" ? "lunch" : "dinner") ? "selected" : ""}>${h(t("meal_" + m))}</option>`).join("")}</select></label>
+      <label class="field"><span>${h(t("meal"))}</span><select name="meal">${planMeals().map((m) => `<option value="${m}" ${m === (planMeals().find((x) => slotFit(recipe, x) === 2) || planMeals().find((x) => slotFit(recipe, x)) || planMeals().at(-1)) ? "selected" : ""}>${h(t("meal_" + m))}</option>`).join("")}</select></label>
       <label class="field"><span>${h(t("servings"))}</span><input name="servings" inputmode="numeric" value="${recipe.servings || 2}"></label>
     </div>
+    <label class="check-row"><input type="checkbox" name="double"><span><strong>${h(t("cook_double"))}</strong><small>${h(t("cook_double_sub"))}</small></span></label>
     <div class="row-end"><button class="btn btn-primary">${h(t("add"))}</button></div></form>`, {
     onMount: (el, close) => el.querySelector("form").onsubmit = (e) => {
       e.preventDefault();
       const f = e.target;
-      S.state.plan.push({ id: uid(), date: f.date.value, meal: f.meal.value, recipeId: recipe.id, servings: +f.servings.value || recipe.servings || 2, done: false });
+      const servings = +f.servings.value || recipe.servings || 2;
+      // Cook once, eat twice: the pot is doubled and the next day's midday meal is the leftovers (nothing extra to buy).
+      const double = f.double.checked;
+      S.state.plan.push({ id: uid(), date: f.date.value, meal: f.meal.value, recipeId: recipe.id, servings: double ? servings * 2 : servings, done: false });
+      if (double) S.state.plan.push({ id: uid(), date: addDays(f.date.value, 1), meal: S.state.prefs.ramadan ? "iftar" : "lunch", recipeId: recipe.id, servings, done: false, leftover: true });
       save(); close(); toast(t("added_to_plan"), "info", { label: t("view"), fn: () => go("#/plan") });
       after?.();
     },

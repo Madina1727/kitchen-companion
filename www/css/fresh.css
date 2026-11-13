@@ -1,0 +1,214 @@
+/* Fresh green palette: leaf, herb, lime and mint on a soft garden cream, with lemon and honey highlights.
+   Loaded after design.css. To go back to the tomato look, link vibrant.css instead of this file in index.html. */
+:root, :root[data-theme="light"] {
+  --c-canvas: #F5FAF0; --c-surface: #FFFFFF; --c-sunken: #E7F2DF; --c-inverse: #12261A;
+  --c-accent: #1B8046; --c-accent-strong: #14663A; --c-accent-subtle: #D9F0DD;
+  --c-success: #16804A; --c-success-subtle: #DCF5E5; --c-warning-subtle: #FFF0BF; --c-partial: #E89A0C;
+  --t-primary: #14261B; --t-secondary: #4D6355; --t-accent: #17713E; --t-accent-strong: #105A30; --t-success: #11703F; --t-warning: #7A4B00;
+  --t-on-inverse: #F5FAF0; --t-on-inverse-muted: #CFE3D0;
+  --b-default: #D5E6CF; --b-strong: #14261B; --line-strong: #BFD8B8;
+  --c-feature: #12261A; --c-night: #0F1F15; --c-night-raised: #1B3324; --b-night: #35543F; --t-on-dark: #F5FAF0; --t-on-dark-muted: #CFE3D0;
+  /* red is kept only for problems: missing, expired, errors, delete */
+  --red: #B3261E; --red-bg: #FDE3DE; --c-danger: #C8321F;
+  /* garden colours */
+  --f-leaf: #1F8A4C; --f-herb: #0F6B4F; --f-lime: #7DB928; --f-mint: #12909A; --f-sage: #5E8A5A; --f-lemon: #FFD23F; --f-honey: #E89A0C; --f-berry: #D12E63;
+  --g-hero: linear-gradient(135deg, #1A7F45 0%, #136B3F 55%, #0B5647 100%);
+  --g-basil: linear-gradient(135deg, #2C7A3A 0%, #1E6A30 100%);
+  --g-lime: linear-gradient(135deg, #E4F4B4 0%, #BFE283 100%);
+  --g-herb: linear-gradient(135deg, #12808A 0%, #0D5F6E 100%);
+  --shadow: 0 1px 2px rgba(20, 70, 35, .06), 0 10px 26px rgba(25, 110, 60, .10);
+  --shadow-float: 0 12px 32px rgba(20, 100, 55, .20), 0 2px 6px rgba(20, 70, 35, .08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-canvas: #0F1A13; --c-surface: #18261C; --c-sunken: #203226; --c-inverse: #EEF8EA;
+    --c-accent: #1B8046; --c-accent-strong: #14663A; --c-accent-subtle: #1D3A27; --c-success-subtle: #173826; --c-warning-subtle: #45300F; --c-partial: #F2A51E;
+    --t-primary: #F0F8EC; --t-secondary: #BDD2C0; --t-accent: #7FDB9E; --t-accent-strong: #9BE8B4; --t-success: #6FDA9C; --t-warning: #FFC861;
+    --t-on-inverse: #14261B; --t-on-inverse-muted: #4D6355; --b-default: #2E4635; --line-strong: #3E5C47; --c-feature: #18261C;
+    --red: #FF9A8C; --red-bg: #4A201A; --c-danger: #C8321F;
+    /* older alias names used by app.css, so no grey-brown surfaces are left in dark mode */
+    --bg: var(--c-canvas); --surface: var(--c-surface); --surface-2: var(--c-sunken); --line: var(--b-default); --text: var(--t-primary); --muted: var(--t-secondary);
+    --accent: #7FDB9E; --accent-hover: #9BE8B4; --accent-soft: #1D3A27; --on-accent: #0F1A13;
+    --green: var(--t-success); --amber: var(--t-warning); --green-bg: var(--c-success-subtle); --amber-bg: var(--c-warning-subtle); --apricot: var(--c-partial); --apricot-soft: var(--c-warning-subtle);
+    --c-night: #0A130D; --c-night-raised: #18261C; --b-night: #2E4635; --t-on-dark: #F0F8EC; --t-on-dark-muted: #BDD2C0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .28); --shadow-float: 0 12px 32px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+  }
+}
+:root[data-theme="dark"] {
+  --c-canvas: #0F1A13; --c-surface: #18261C; --c-sunken: #203226; --c-inverse: #EEF8EA;
+  --c-accent: #1B8046; --c-accent-strong: #14663A; --c-accent-subtle: #1D3A27; --c-success-subtle: #173826; --c-warning-subtle: #45300F; --c-partial: #F2A51E;
+  --t-primary: #F0F8EC; --t-secondary: #BDD2C0; --t-accent: #7FDB9E; --t-accent-strong: #9BE8B4; --t-success: #6FDA9C; --t-warning: #FFC861;
+  --t-on-inverse: #14261B; --t-on-inverse-muted: #4D6355; --b-default: #2E4635; --line-strong: #3E5C47; --c-feature: #18261C;
+  --red: #FF9A8C; --red-bg: #4A201A; --c-danger: #C8321F;
+    /* older alias names used by app.css, so no grey-brown surfaces are left in dark mode */
+    --bg: var(--c-canvas); --surface: var(--c-surface); --surface-2: var(--c-sunken); --line: var(--b-default); --text: var(--t-primary); --muted: var(--t-secondary);
+    --accent: #7FDB9E; --accent-hover: #9BE8B4; --accent-soft: #1D3A27; --on-accent: #0F1A13;
+    --green: var(--t-success); --amber: var(--t-warning); --green-bg: var(--c-success-subtle); --amber-bg: var(--c-warning-subtle); --apricot: var(--c-partial); --apricot-soft: var(--c-warning-subtle);
+    --c-night: #0A130D; --c-night-raised: #18261C; --b-night: #2E4635; --t-on-dark: #F0F8EC; --t-on-dark-muted: #BDD2C0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .28); --shadow-float: 0 12px 32px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+}
+
+/* ---------- problems stay red, so they stand out against the green ---------- */
+.btn-danger-ghost, .verdict.warn, .st-red, .btn-link.danger, .form-error { color: var(--red); }
+.btn-danger, .toast-error { background: var(--c-danger); border-color: var(--c-danger); color: #fff; }
+.ing-row.missing-row { background: var(--red-bg); }
+.pantry-card.is-expired { border-color: color-mix(in srgb, var(--c-danger) 45%, var(--b-default)); }
+
+.timer .btn { background: #F5FAF0; color: #14261B; }
+
+/* ---------- fresh surfaces ---------- */
+.hero-dark { background: var(--g-hero); color: #fff; position: relative; overflow: hidden; box-shadow: var(--shadow-float); }
+.hero-dark::after { content: ""; position: absolute; right: -60px; top: -60px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(circle, rgba(200, 240, 90, .40), transparent 70%); pointer-events: none; }
+.hero-dark .eyebrow, .hero-dark .meta { color: #E2F6E4; }
+.hero-dark h2 { color: #fff; }
+.hero-dark .btn-primary { background: #FFD23F; border-color: #FFD23F; color: #14261B; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.hero-dark .btn-primary:hover { background: #FFDD6B; border-color: #FFDD6B; }
+.hero-dark .btn:not(.btn-primary) { border-color: rgba(255, 255, 255, .55); color: #fff; }
+.kit-banner { background: var(--g-basil); color: #fff; box-shadow: var(--shadow); }
+.kit-banner small { color: #E4FFE9; }
+.kit-banner .btn-primary { background: #FFD23F; border-color: #FFD23F; color: #14261B; }
+.list-summary { background: var(--g-lime); color: #14261B; box-shadow: var(--shadow); }
+.list-summary .eyebrow, .list-summary p { color: #2F4A1A; }
+.list-summary .bar { background: rgba(20, 38, 27, .15); }
+.list-summary .bar span { background: #14663A; }
+.imp-book { background: var(--g-herb); }
+.imp-book small { color: #DDF6F6; }
+.dark-card { background: var(--g-hero); }
+
+/* bottom bar + nav active: leaf green */
+.bn-link.on, .side-link.on { background: var(--c-accent); color: #fff; }
+.day-btn.on { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.day-btn.on small { color: #FFFFFF; }
+.day-btn.on .dots i { background: #FFD23F; }
+.choice input:checked + span, .lang-tile input:checked + span { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.lang-tile input:checked + span small { color: #FFFFFF; }
+.msg-user .bubble { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.circle-btn.dark, .btn-dark, .search-wrap .filter-btn { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.fab { background: var(--g-hero); }
+.btn-primary { box-shadow: 0 4px 14px rgba(27, 128, 70, .28); }
+.brand-mark { background: var(--g-hero); }
+.avatar { background: var(--g-lime); color: #14261B; }
+.count-badge { background: var(--f-honey); color: #14261B; }
+
+/* category covers for recipes without a photo: mostly greens, with honey and berry for contrast */
+.cover-type { position: relative; overflow: hidden; }
+.cover-type span { color: rgba(255, 255, 255, .95); opacity: 1; font-style: italic; text-shadow: 0 2px 12px rgba(0, 0, 0, .18); z-index: 1; }
+.cover-type::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 80% 15%, rgba(255, 255, 255, .28), transparent 45%), radial-gradient(circle at 10% 90%, rgba(0, 0, 0, .12), transparent 50%); }
+.tint-0 { background: linear-gradient(135deg, #F4C534, #E0981A); }   /* breakfast: honey */
+.tint-1 { background: linear-gradient(135deg, #3DB86B, #1B8046); }   /* lunch: leaf */
+.tint-2 { background: linear-gradient(135deg, #1F8F7A, #0E5F5C); }   /* dinner: herb */
+.tint-3 { background: linear-gradient(135deg, #E8668C, #B83868); }   /* dessert: berry */
+.tint-4 { background: linear-gradient(135deg, #9CCB3B, #5E9A1F); }   /* snack: lime */
+.tint-5 { background: linear-gradient(135deg, #2FB7C4, #12808F); }   /* drink: mint */
+.tint-6 { background: linear-gradient(135deg, #7FA36C, #3F6B45); }   /* other: sage */
+
+/* chips, tags and match results */
+.chip.on, .tab.on { background: var(--c-accent); border-color: var(--c-accent); box-shadow: 0 3px 10px rgba(27, 128, 70, .25); }
+.chip .ic { color: var(--f-leaf); }
+.chip.on .ic, .tab.on .ic { color: inherit; }
+.match-badge { color: #fff; background: var(--c-accent); }
+.match-badge.partial { color: #14261B; background: #FFD23F; }
+.match-badge.miss { color: #fff; background: var(--c-danger); }
+.bar span { background: var(--f-leaf); }
+.bar.partial span { background: linear-gradient(90deg, #FFD23F, #E89A0C); }
+.fav-mark { color: var(--f-berry); }
+.fav-mark .ic.filled { fill: var(--f-berry); color: var(--f-berry); }
+.ic.fav-on { fill: var(--f-berry); color: var(--f-berry); }
+
+/* ingredient tiles and add tiles */
+.ing-icon { background: #E1F3DC; color: var(--f-leaf); }
+.add-tile.t-red { background: linear-gradient(135deg, #EAF6C8, #D8EDA4); color: #3F5C0A; }
+.add-tile.t-amber { background: linear-gradient(135deg, #FFF3C4, #FFE59A); color: #6E4300; }
+.add-tile.t-green { background: linear-gradient(135deg, #DCF5E5, #C2EDD3); color: #0E6B39; }
+.add-tile.t-dark { background: linear-gradient(135deg, #D9F3F3, #BDE8EA); color: #0B5A63; }
+.tile .ic, .imp-opt .ic, .menu-item .ic { color: var(--f-leaf); }
+.steps li::before { background: var(--c-accent); color: #fff; }
+.step-n { background: var(--c-accent-subtle); color: var(--t-accent-strong); }
+.cook-segs span.on { background: linear-gradient(90deg, #9CCB3B, #1B8046); }
+.ob-art { background: var(--g-lime); }
+.ob-art .mark { background: var(--g-hero); box-shadow: 0 10px 30px rgba(20, 100, 55, .35); }
+.ob-art .ring { border-color: rgba(255, 255, 255, .6); }
+.ideas-panel { border: 0; background: linear-gradient(180deg, #ECF7E4, #FFFFFF 60%); box-shadow: var(--shadow); }
+.ideas-head h2 .ic { color: var(--f-lime); }
+.people .seg button.on { background: var(--c-accent); color: #fff; }
+.pantry-card, .rcard, .rrow, .panel, .add-card, .idea { box-shadow: var(--shadow); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ideas-panel { background: var(--c-surface); }
+  :root:not([data-theme="light"]) .ing-icon { background: #213A29; color: #7FDB9E; }
+  :root:not([data-theme="light"]) .add-tile { filter: saturate(1.1) brightness(.9); }
+  :root:not([data-theme="light"]) :is(.chip .ic, .tile .ic, .imp-opt .ic, .menu-item .ic) { color: #7FDB9E; }
+  :root:not([data-theme="light"]) :is(.chip.on .ic, .tab.on .ic) { color: inherit; }
+}
+:root[data-theme="dark"] .ideas-panel { background: var(--c-surface); }
+:root[data-theme="dark"] .ing-icon { background: #213A29; color: #7FDB9E; }
+:root[data-theme="dark"] .add-tile { filter: saturate(1.1) brightness(.9); }
+:root[data-theme="dark"] :is(.chip .ic, .tile .ic, .imp-opt .ic, .menu-item .ic) { color: #7FDB9E; }
+:root[data-theme="dark"] :is(.chip.on .ic, .tab.on .ic) { color: inherit; }
+a { color: var(--t-accent); }
+
+/* ---------- meal-type sections in the recipe library ---------- */
+.type-chips { margin-bottom: 14px; }
+.chip small, .meal-head h2 small { font: 600 13px var(--sans); color: var(--t-secondary); margin-left: 4px; }
+.chip.on small { color: inherit; opacity: .85; }
+.meal-sec { margin-bottom: 28px; }
+.meal-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.meal-head h2 { font-size: 24px; margin: 0; }
+.meal-head .btn-link { display: inline-flex; align-items: center; gap: 2px; color: var(--t-accent); font-weight: 600; white-space: nowrap; }
+.meal-field { border: 0; padding: 0; margin: 0 0 14px; }
+.meal-field .meta { margin: 8px 0 0; }
+.meal-line { margin: 0 0 4px; font: 700 12px/1.3 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--t-accent); }
+
+/* meal types on cards: solid coloured labels, readable at a glance */
+.meal-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.meal-tag { display: inline-block; padding: 5px 12px; border-radius: 999px; font: 700 14px/1.2 var(--sans); letter-spacing: .01em; color: #fff; background: #55695B; }
+.mt-breakfast { background: #A85A00; }
+.mt-lunch { background: #1B8046; }
+.mt-dinner { background: #0F6B68; }
+.mt-dessert { background: #B83868; }
+.mt-snack { background: #5B7F12; }
+.mt-drink { background: #0F7684; }
+.mt-other { background: #55695B; }
+.rrow .meal-tag { font-size: 12px; padding: 3px 9px; }
+
+/* ---------- plan switches, sharing, idea deck ---------- */
+.switch-row, .check-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; margin: 0 0 14px; border: 1px solid var(--b-default); border-radius: var(--r-lg); background: var(--c-surface); cursor: pointer; }
+.switch-row input, .check-row input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--c-accent); flex: none; }
+.switch-row strong, .check-row strong { display: flex; align-items: center; gap: 6px; }
+.switch-row small, .check-row small { display: block; color: var(--t-secondary); font-size: 14px; }
+.share-text { white-space: pre-wrap; font: 14px/1.5 var(--sans); background: var(--c-sunken); border-radius: var(--r-md); padding: 14px; max-height: 40vh; overflow: auto; margin: 0 0 14px; }
+.idea-cta { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px 18px; margin: 0 0 16px; border: 0; border-radius: var(--r-xl); background: var(--g-lime); color: #14261B; cursor: pointer; box-shadow: var(--shadow); font: inherit; }
+.idea-cta span { flex: 1; } .idea-cta strong { display: block; font: 600 18px var(--serif); } .idea-cta small { color: #2F4A1A; font-size: 14px; }
+.deck-card { margin: 14px 0; border: 1px solid var(--b-default); border-radius: var(--r-xl); overflow: hidden; background: var(--c-surface); box-shadow: var(--shadow-float); touch-action: pan-y; user-select: none; cursor: grab; transition: transform .15s; }
+.deck-card[data-dir="yes"] { outline: 3px solid var(--c-accent); } .deck-card[data-dir="no"] { outline: 3px solid var(--line-strong); }
+.deck-card .cover { height: 220px; border-radius: 0; } .deck-card .cover img { width: 100%; height: 100%; object-fit: cover; }
+.deck-body { padding: 14px 16px 16px; } .deck-body h3 { font: 500 22px var(--serif); margin: 0 0 4px; }
+.deck-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.meta.center { text-align: center; }
+.effort { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.effort span { display: inline-flex; align-items: center; gap: 5px; }
+.diff-easy { color: var(--t-success); } .diff-medium { color: var(--t-warning); } .diff-hard { color: var(--red); }
+#deck-modes button { padding-left: 8px; padding-right: 8px; font-size: 14px; white-space: nowrap; }
+
+/* ---------- people, calories, protein, cost; dish type and cuisine ---------- */
+.rcard .kind { font-weight: 600; color: var(--t-primary); margin: 2px 0 0; }
+.rcard .nutri-line { margin: 2px 0 0; }
+.filter-row { display: flex; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
+.filter-row select { flex: 1 1 160px; min-height: 44px; border-radius: 999px; padding: 0 14px; }
+.people-box { margin: 14px 0; padding: 16px; border: 1px solid var(--b-default); border-radius: var(--r-xl); background: var(--c-surface); }
+.people-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.people-row strong { display: inline-flex; align-items: center; gap: 8px; font-size: 17px; }
+.stepper-pill.big { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px; }
+.stepper-pill.big b { min-width: 86px; text-align: center; font-size: 17px; }
+.stepper-pill.big button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--c-accent); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.fact-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 8px; }
+.fact-tiles > div { background: var(--c-sunken); border-radius: var(--r-md); padding: 10px 12px; }
+.fact-tiles .wide { grid-column: 1 / -1; background: var(--c-accent-subtle); }
+.fact-tiles small { display: block; color: var(--t-secondary); font-size: 12.5px; line-height: 1.3; }
+.fact-tiles b { font: 600 19px var(--serif); }
+.fact-tiles .wide b { font: 600 15px var(--sans); }
+.price-list { max-height: 55vh; overflow: auto; margin: 12px 0; }
+.price-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 10px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--b-default); }
+.price-row[hidden] { display: none; }
+.price-row input { min-height: 38px; text-align: right; }
+.price-row small { color: var(--t-secondary); }

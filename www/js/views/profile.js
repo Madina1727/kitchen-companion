@@ -1,5 +1,6 @@
 // Onboarding, profile & settings, and the cooking assistant.
-import { S, t, h, icon, save, saveNow, toast, confirmDialog, go, uid, iname, recipeById, download, dateLabel, refreshIcons, qty, minutes , aiAvailable } from "../core.js";
+import { FACTS } from "../nutri.js";
+import { S, t, h, icon, save, saveNow, toast, confirmDialog, go, uid, iname, recipeById, download, dateLabel, refreshIcons, qty, minutes , aiAvailable, ensureMeals, guessMeals, openSheet } from "../core.js";
 import { ALLERGENS, DEFAULT_STAPLES, INGREDIENTS, BY_ID, SAMPLE_RECIPES } from "../catalog.js";
 import { resolveIngredient, expiryStatus } from "../engine.js";
 import { askAssistant, aiErrorKey } from "../ai.js";
@@ -91,7 +92,7 @@ export function loadSamples() {
   for (const s of SAMPLE_RECIPES) {
     if (have.has(s.title)) continue;
     S.state.recipes.push({
-      id: uid(), title: s.title, description: s.description, image: "", category: s.category, cuisine: s.cuisine, difficulty: s.difficulty,
+      id: uid(), title: s.title, description: s.description, image: "", category: s.category, meals: guessMeals(s), cuisine: s.cuisine, difficulty: s.difficulty,
       prepTime: s.prepTime, cookTime: s.cookTime, servings: s.servings, tags: [], notes: "",
       ingredients: s.ingredients.map(([id, q, unit, note, essential]) => ({ name: BY_ID[id].names.en, ingredientId: id, qty: q, unit, note, essential })),
       steps: s.steps.map((text, i) => ({ text, timer: s.timers?.[i] || 0 })),
@@ -170,6 +171,10 @@ export function viewProfile() {
       ${files.length ? `<ul class="hist">${files.map((f) => `<li><span>${h(dateLabel(f.added?.slice(0, 10)))}</span> ${h(f.name)} <span class="meta">${f.pages ? h(t("n_pages", { n: f.pages })) + " · " : ""}${h(t("n_recipes_found_short", { n: f.recipes || 0 }))}</span> <button class="btn-link" data-act="open-file" data-id="${h(f.id)}">${h(t("open"))}</button></li>`).join("")}</ul>` : `<p class="meta">${h(t("no_files"))}</p>`}
     </section>
 
+    <section class="panel"><h2>${icon("wallet")} ${h(t("prices_title"))}</h2>
+      <p class="meta">${h(t("prices_sub"))}</p>
+      <button class="btn" data-act="edit-prices">${icon("pencil")} ${h(t("edit_prices"))}${Object.keys(S.state.prefs.prices || {}).length ? " (" + Object.keys(S.state.prefs.prices).length + ")" : ""}</button>
+    </section>
     <section class="panel"><h2>${icon("database")} ${h(t("your_data"))}</h2>
       <p class="meta">${h(t("data_note"))}</p>
       <div class="row wrap">
@@ -264,12 +269,34 @@ export function bindProfile(root, rr) {
       if (!(await confirmDialog(t("import_data_q", { r: data.recipes.length, i: data.inventory.length }), { ok: t("replace") }))) return;
       const base = emptyState();
       S.state = Object.assign(S.state, { ...base, ...data, prefs: { ...base.prefs, ...data.prefs }, settings: { ...base.settings, ...S.state.settings } });
+      ensureMeals();
       await saveNow(); toast(t("data_imported")); rr();
     } catch { toast(t("bad_backup"), "error"); }
   });
 }
 
 export const profileActions = {
+  "edit-prices": (_, rr) => {
+    const mine = S.state.prefs.prices ||= {};
+    const lang = S.state.prefs.lang || "en";
+    const rows = INGREDIENTS.filter((i) => FACTS[i.id] && FACTS[i.id][2] > 0).map((i) => ({ id: i.id, name: i.names[lang] || i.names.en, def: FACTS[i.id][2] })).sort((a, b) => a.name.localeCompare(b.name, lang));
+    openSheet(t("prices_title"), `<p class="meta">${h(t("prices_sub"))}</p>
+      <label class="search">${icon("search")}<input type="search" id="price-q" placeholder="${h(t("search"))}"></label>
+      <form id="price-form"><div class="price-list">${rows.map((x) => `<label class="price-row" data-name="${h(x.name.toLowerCase())}"><span>${h(x.name)}</span><input name="${x.id}" inputmode="numeric" value="${mine[x.id] ?? ""}" placeholder="${x.def.toLocaleString("en-US")}"><small>₩ / kg</small></label>`).join("")}</div>
+      <div class="row-between sticky-actions"><button type="button" class="btn" data-reset>${h(t("prices_reset"))}</button><button class="btn btn-primary">${icon("check")} ${h(t("save"))}</button></div></form>`, {
+      wide: true,
+      onMount: (el, close) => {
+        el.querySelector("#price-q").addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); el.querySelectorAll(".price-row").forEach((r) => { r.hidden = !!q && !r.dataset.name.includes(q); }); });
+        el.querySelector("[data-reset]").onclick = () => el.querySelectorAll(".price-row input").forEach((i) => { i.value = ""; });
+        el.querySelector("#price-form").onsubmit = (e) => {
+          e.preventDefault();
+          const next = {};
+          for (const i of e.target.querySelectorAll("input[name]")) { const n = parseFloat(i.value.replace(/[,\s]/g, "")); if (n >= 0 && i.value.trim() !== "") next[i.name] = n; }
+          S.state.prefs.prices = next; save(); close(); toast(t("prices_saved")); rr();
+        };
+      },
+    });
+  },
   "sync-now": async (_, rr) => { await pull(); rr(); },
   "sign-out": async (_, rr) => { if (await confirmDialog(t("sign_out_q"))) { await signOut(); rr(); } },
   "staple-del": (el, rr) => { S.state.prefs.staples = S.state.prefs.staples.filter((x) => x !== el.dataset.id); save(); rr(); },

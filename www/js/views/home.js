@@ -1,8 +1,8 @@
 // Home ("What can I cook today?") and the full recommendations screen.
-import { S, t, h, icon, iname, minutes, go, todayISO, recipeById, catLabel, catIcon, qty, save, toast, uid, aiAvailable } from "../core.js";
+import { S, t, h, icon, iname, minutes, go, todayISO, recipeById, catLabel, catIcon, qty, save, toast, uid, aiAvailable, mealsOf, guessMeals, openSheet, refreshIcons, planMeals, slotFit, addDays, dateLabel } from "../core.js";
 import { matchAll, matchRecipe, expiryStatus, ingCategory, exclusionsFor } from "../engine.js";
 import { suggestFromKitchen, aiErrorKey } from "../ai.js";
-import { recipeCard, recipeRow, ctx, emptyLibrary, RECIPE_CATS } from "./recipes.js";
+import { recipeCard, recipeRow, ctx, emptyLibrary, RECIPE_CATS, recipeCover, mealChips, availabilityLine } from "./recipes.js";
 import { expiryBadge, expiryPill, setKitchenFilter } from "./kitchen.js";
 
 function greeting() {
@@ -18,10 +18,10 @@ const HOME_CHIPS = [["all", "all"], ["quick", "quick_meals_chip"], ["dinner", "c
 export function viewHome() {
   const st = S.state;
   const matches = matchAll(st.recipes, ctx());
-  const ok = matches.filter((m) => m.bucket !== "blocked");
+  const ok = matches.filter((m) => m.bucket !== "blocked" && !m.recipe.noSuggest); // "Don't suggest" recipes stay in the library only
   const ready = ok.filter((m) => m.bucket === "ready" || m.bucket === "subs");
   const near = ok.filter((m) => m.bucket === "one" || m.bucket === "short");
-  const chipOk = (m) => homeState.chip === "all" ? true : homeState.chip === "quick" ? m.totalTime && m.totalTime <= 30 : m.recipe.category === homeState.chip;
+  const chipOk = (m) => homeState.chip === "all" ? true : homeState.chip === "quick" ? m.totalTime && m.totalTime <= 30 : mealsOf(m.recipe).includes(homeState.chip);
   const expiring = st.inventory.filter((it) => ["expired", "soon", "week"].includes(expiryStatus(it))).sort((a, b) => (a.expires || "").localeCompare(b.expires || ""));
   const soonCount = st.inventory.filter((it) => ["expired", "soon"].includes(expiryStatus(it))).length;
   const useExp = ok.filter((m) => m.usesExpiring && ["ready", "subs", "short", "one"].includes(m.bucket)).slice(0, 3);
@@ -57,6 +57,7 @@ export function viewHome() {
       ${heroImg ? `<div class="hero-img"><img src="${h(heroImg)}" alt=""></div>` : ""}
     </section>
 
+    ${st.recipes.length ? `<button class="idea-cta" data-act="home-deck">${icon("shuffle")}<span><strong>${h(t("no_idea"))}</strong><small>${h(t("no_idea_sub"))}</small></span>${icon("chevron-right")}</button>` : ""}
     ${st.recipes.length ? `<div class="chips" role="group" aria-label="${h(t("category"))}">${HOME_CHIPS.map(([v, k]) => `<button class="chip ${homeState.chip === v ? "on" : ""}" data-act="home-chip" data-v="${v}">${h(t(k))}</button>`).join("")}</div>` : ""}
 
     ${planned.length ? `<section class="sec"><div class="sec-head"><h2>${h(t("planned_today"))}</h2><a href="#/plan">${h(t("open_planner"))}</a></div>
@@ -94,7 +95,66 @@ export function bindHome(root) {
   });
 }
 
+/* ---------- "No idea": one dish at a time; right = plan it, left = next ---------- */
+function ideaDeck(rr) {
+  const all = matchAll(S.state.recipes.filter((r) => !r.noSuggest), ctx()).filter((m) => m.bucket !== "blocked");
+  const mix = (list) => list.map((m) => [m, Math.random()]).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+  const pools = {
+    any: () => mix(all),
+    quick: () => mix(all.filter((m) => m.totalTime && m.totalTime <= 30)),
+    kitchen: () => all.filter((m) => ["ready", "subs", "one", "short"].includes(m.bucket)).sort((a, b) => b.score - a.score),
+    sweet: () => mix(all.filter((m) => mealsOf(m.recipe).includes("dessert"))),
+  };
+  let mode = "any", deck = pools.any(), i = 0, planned = 0;
+  openSheet(t("no_idea"), `<div class="seg seg-full" id="deck-modes">${Object.keys(pools).map((k) => `<button data-mode="${k}" class="${k === mode ? "on" : ""}">${h(t("deck_" + k))}</button>`).join("")}</div>
+    <div id="deck-card"></div>
+    <div class="deck-actions"><button class="btn btn-lg" data-skip>${icon("x")} ${h(t("deck_next"))}</button><button class="btn btn-primary btn-lg" data-plan>${icon("check")} ${h(t("deck_plan"))}</button></div>
+    <p class="meta center">${h(t("deck_hint"))}</p>`, {
+    onClose: () => { if (planned) rr(); },
+    onMount: (el) => {
+      const box = el.querySelector("#deck-card");
+      const draw = () => {
+        const m = deck[i];
+        el.querySelector("[data-plan]").disabled = el.querySelector("[data-skip]").disabled = !m;
+        box.innerHTML = m ? `<article class="deck-card">${recipeCover(m.recipe)}<div class="deck-body">${mealChips(m.recipe)}<h3>${h(m.recipe.title)}</h3>
+          <p class="meta">${m.totalTime ? icon("clock") + " " + h(minutes(m.totalTime)) : ""}</p>${availabilityLine(m)}
+          <a class="btn-link" href="#/recipe/${m.recipe.id}" data-open>${h(t("open_recipe"))}</a></div></article>`
+          : `<div class="empty"><p>${h(t(deck.length ? "deck_end" : "no_results"))}</p>${deck.length ? `<button class="btn" data-again>${h(t("deck_again"))}</button>` : ""}</div>`;
+        refreshIcons(box);
+        box.querySelector("[data-again]")?.addEventListener("click", () => { deck = pools[mode](); i = 0; draw(); });
+        const card = box.querySelector(".deck-card");
+        if (!card) return;
+        // Drag the card: right to plan, left for the next one.
+        let x0 = null, dx = 0;
+        card.onpointerdown = (e) => { if (e.target.closest("a")) return; x0 = e.clientX; dx = 0; card.setPointerCapture(e.pointerId); };
+        card.onpointermove = (e) => { if (x0 == null) return; dx = e.clientX - x0; card.style.transform = `translateX(${dx}px) rotate(${dx / 30}deg)`; card.dataset.dir = dx > 60 ? "yes" : dx < -60 ? "no" : ""; };
+        card.onpointerup = card.onpointercancel = () => { if (x0 == null) return; x0 = null; if (dx > 90) plan(); else if (dx < -90) next(); else { card.style.transform = ""; card.dataset.dir = ""; } };
+      };
+      const next = () => { i++; draw(); };
+      const plan = () => {
+        const r = deck[i].recipe;
+        // The first free meal of the right kind, from today on.
+        let slot = null;
+        for (let d = 0; d < 14 && !slot; d++) for (const meal of planMeals()) {
+          const date = addDays(todayISO(), d);
+          if (slotFit(r, meal) && !S.state.plan.some((p) => p.date === date && p.meal === meal)) { slot = { date, meal }; break; }
+        }
+        slot ||= { date: todayISO(), meal: planMeals().at(-1) };
+        S.state.plan.push({ id: uid(), date: slot.date, meal: slot.meal, recipeId: r.id, servings: r.servings || 2, done: false });
+        save(); planned++;
+        toast(t("deck_planned", { x: r.title, d: dateLabel(slot.date, { weekday: "long" }), m: t("meal_" + slot.meal).toLowerCase() }));
+        next();
+      };
+      el.querySelector("[data-skip]").onclick = next;
+      el.querySelector("[data-plan]").onclick = plan;
+      el.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => { mode = b.dataset.mode; deck = pools[mode](); i = 0; el.querySelectorAll("[data-mode]").forEach((x) => x.classList.toggle("on", x === b)); draw(); });
+      draw();
+    },
+  });
+}
+
 export const homeActions = {
+  "home-deck": (_, rr) => ideaDeck(rr),
   surprise: () => {
     const ok = matchAll(S.state.recipes, ctx()).filter((m) => m.bucket === "ready" || m.bucket === "subs");
     const pool = ok.length ? ok : matchAll(S.state.recipes, ctx()).filter((m) => m.bucket !== "blocked" && m.bucket !== "far");
@@ -120,7 +180,7 @@ export function viewDiscover() {
   const blocked = all.filter((m) => m.bucket === "blocked");
   let list = all.filter((m) => m.bucket !== "blocked");
   if (f.time) list = list.filter((m) => m.totalTime && m.totalTime <= f.time);
-  if (f.cat !== "all") list = list.filter((m) => m.recipe.category === f.cat);
+  if (f.cat !== "all") list = list.filter((m) => mealsOf(m.recipe).includes(f.cat));
   if (f.exp) list = list.filter((m) => m.usesExpiring);
   if (f.fav) list = list.filter((m) => m.recipe.favorite);
   if (f.avail === "ready") list = list.filter((m) => m.bucket === "ready" || m.bucket === "subs");
@@ -263,7 +323,7 @@ function saveIdea(k) {
   const idea = S.state.ideas.items[k];
   if (idea.savedId && recipeById(idea.savedId)) return idea.savedId;
   const r = {
-    id: uid(), title: idea.title, description: idea.description || "", image: "", category: idea.category, cuisine: idea.cuisine || "", difficulty: idea.difficulty || "",
+    id: uid(), title: idea.title, description: idea.description || "", image: "", category: idea.category, meals: guessMeals(idea), cuisine: idea.cuisine || "", difficulty: idea.difficulty || "",
     prepTime: idea.prepTime, cookTime: idea.cookTime, servings: idea.servings, tags: [], notes: "",
     ingredients: idea.ingredients.map(({ fromKitchen, ...i }) => i), steps: idea.steps,
     source: { type: "ai" }, language: S.state.prefs.lang, favorite: false, collections: [], createdAt: new Date().toISOString(), translations: {},

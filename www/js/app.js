@@ -7,7 +7,8 @@ import { viewKitchen, bindKitchen, kitchenActions } from "./views/kitchen.js";
 import { viewCook, cookActions, undoLog } from "./views/cook.js";
 import { viewPlan, planActions, viewGrocery, groceryActions, bindGrocery } from "./views/plan.js";
 import { viewBooks, viewBookNew, bindBookNew, viewBook, bindBook, bookActions, onBookUpdate } from "./views/books.js";
-import { viewReview, viewReviewEdit } from "./views/importer.js";
+import { viewReview, viewReviewEdit, importInboxBook } from "./views/importer.js";
+const autoImports = new Set();
 import { viewOnboarding, bindOnboarding, onboardActions, viewProfile, bindProfile, profileActions, viewAssistant, bindAssistant, assistantActions, loadSamples } from "./views/profile.js";
 
 const ACTIONS = {
@@ -99,7 +100,17 @@ function renderNow(opts) {
     case "books": html = viewBooks(); break;
     case "book":
       active = "books";
-      if (r1 === "new") { html = viewBookNew(); bind = bindBookNew; }
+      if (r1 === "auto" && r2) {
+        // #/book/auto/<file name>: add a book from the local inbox folder, read it and save its recipes.
+        const name = decodeURIComponent(r2);
+        html = `<div class="page page-narrow"><div class="empty"><span class="spinner"></span><h2>${h(name)}</h2><p>${h(t("processing"))}</p></div></div>`;
+        if (!autoImports.has(name)) {
+          autoImports.add(name);
+          importInboxBook(name).then((b) => { toast(t("saved_n_recipes", { n: b.saved || 0 })); go("#/book/" + b.id); })
+            .catch((e) => { autoImports.delete(name); toast(e?.message || t("import_failed"), "error"); go("#/books"); });
+        }
+      }
+      else if (r1 === "new") { html = viewBookNew(); bind = bindBookNew; }
       else if (r2 === "review") { html = viewReview(); bind = bindImport; }
       else if (r2?.startsWith("edit-")) { html = viewReviewEdit(+r2.slice(5)); bind = bindImport; }
       else { html = viewBook(r1); bind = (root, rr) => bindBook(root, rr, r1); }

@@ -6,3 +6,6 @@ android/local.properties
 android/app/src/main/assets/public/
 *.apk
 .DS_Store
+
+# Books dropped in for one-off local import; never published
+www/inbox/

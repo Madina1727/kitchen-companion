@@ -1,11 +1,11 @@
 // Weekly meal planner and grocery list.
-import { S, t, tn, h, icon, save, toast, openSheet, qty, recipeById, go, uid, iname, catLabel, unitLabel, todayISO, addDays, dateLabel, defaultLocation, CATEGORIES, BY_ID } from "../core.js";
+import { S, t, tn, h, icon, save, toast, openSheet, qty, recipeById, go, uid, iname, catLabel, unitLabel, todayISO, addDays, dateLabel, defaultLocation, CATEGORIES, BY_ID, mealsOf, planMeals, slotFit } from "../core.js";
 import { buildGrocery, matchRecipe, resolveIngredient, ingCategory, UNIT_LIST, keyOf } from "../engine.js";
 import { ctx, availabilityLine, recipeRow } from "./recipes.js";
 import { addToInventory } from "./kitchen.js";
 import { parseIngredientLine } from "../parser.js";
 
-const MEALS = ["breakfast", "lunch", "dinner"];
+const ALL_SLOTS = ["suhoor", "breakfast", "lunch", "dinner", "iftar"];
 const ps = { weekStart: null, day: null };
 function mondayOf(iso) { const d = new Date(iso + "T00:00:00"); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return todayISO(d); }
 
@@ -23,7 +23,7 @@ export function viewPlan() {
       <div class="rrows">${es.map((p) => {
         const r = recipeById(p.recipeId);
         if (!r) return "";
-        return `<div class="planned-row ${p.done ? "done" : ""}">${recipeRow(r, { match: matchRecipe(r, ctx(p.servings)), extra: t("n_servings", { n: p.servings }) + (p.done ? " · " + t("cooked") : "") })}
+        return `<div class="planned-row ${p.done ? "done" : ""}">${recipeRow(r, { match: matchRecipe(r, ctx(p.servings)), extra: t("n_servings", { n: p.servings }) + (p.leftover ? " · " + t("leftovers_tag") : "") + (p.done ? " · " + t("cooked") : "") })}
           <div class="row-actions">
             <button class="icon-btn" data-act="plan-serv" data-id="${p.id}" data-d="-1" aria-label="${h(t("fewer"))}">${icon("minus")}</button>
             <button class="icon-btn" data-act="plan-serv" data-id="${p.id}" data-d="1" aria-label="${h(t("more"))}">${icon("plus")}</button>
@@ -38,6 +38,7 @@ export function viewPlan() {
       <div><h1>${h(t("this_week"))}</h1><p class="meta">${h(dateLabel(days[0], { month: "long", day: "numeric" }))} – ${h(dateLabel(days[6], { month: "long", day: "numeric" }))}</p></div>
       <button class="btn btn-dark" data-act="plan-suggest">${icon("sparkle")} ${h(t("auto_plan"))}</button>
     </header>
+    <label class="switch-row"><input type="checkbox" data-act="plan-ramadan" ${st.prefs.ramadan ? "checked" : ""}><span><strong>${icon("moon")} ${h(t("ramadan_mode"))}</strong><small>${h(t("ramadan_mode_sub"))}</small></span></label>
     ${!st.recipes.length ? `<div class="notice">${icon("info")}<div><p>${h(t("plan_needs_recipes"))}</p><p><a href="#/import">${h(t("import_recipe"))}</a></p></div></div>` : ""}
     <div class="row-between" style="margin-top:0">
       <button class="icon-btn" data-act="week" data-d="-7" aria-label="${h(t("prev_week"))}">${icon("chevron-left")}</button>
@@ -52,12 +53,13 @@ export function viewPlan() {
       }).join("")}
     </div>
     <p class="eyebrow accent">${h(dateLabel(ps.day, { weekday: "long" }))} ${h(dateLabel(ps.day, { day: "numeric" }))}</p>
-    ${MEALS.map(mealSec).join("")}
+    ${[...planMeals(), ...ALL_SLOTS.filter((m) => !planMeals().includes(m) && dayEntries.some((p) => p.meal === m))].map(mealSec).join("")}
     <div class="row-end"><button class="btn btn-primary" data-act="plan-grocery" ${weekEntries.filter((e) => !e.done).length ? "" : "disabled"}>${icon("shopping-cart")} ${h(t("make_grocery_list"))}</button></div>
   </div>`;
 }
 
 export const planActions = {
+  "plan-ramadan": (el, rr) => { S.state.prefs.ramadan = !S.state.prefs.ramadan; save(); rr(); },
   week: (el, rr) => { const d = +el.dataset.d; ps.weekStart = d === 0 ? mondayOf(todayISO()) : addDays(ps.weekStart, d); ps.day = d === 0 ? todayISO() : null; rr(); },
   "plan-day": (el, rr) => { ps.day = el.dataset.v; rr(); },
   "plan-del": (el, rr) => { S.state.plan = S.state.plan.filter((p) => p.id !== el.dataset.id); save(); rr(); },
@@ -65,7 +67,7 @@ export const planActions = {
   "plan-pick": (el, rr) => pickRecipe(el.dataset.date, el.dataset.meal, rr),
   "plan-grocery": (_, rr) => {
     const days = [...Array(7)].map((_, i) => addDays(ps.weekStart, i));
-    const entries = S.state.plan.filter((p) => days.includes(p.date) && !p.done);
+    const entries = S.state.plan.filter((p) => days.includes(p.date) && !p.done && !p.leftover); // leftovers are already cooked
     const byId = Object.fromEntries(S.state.recipes.map((r) => [r.id, r]));
     const rows = buildGrocery(entries, byId, S.state.inventory, S.state.prefs.staples);
     // Replace earlier plan-generated items that are not yet bought.
@@ -79,14 +81,17 @@ export const planActions = {
     // Fill empty dinner slots this week with the best kitchen matches not already planned.
     const days = [...Array(7)].map((_, i) => addDays(ps.weekStart, i)).filter((d) => d >= todayISO());
     const used = new Set(S.state.plan.filter((p) => days.includes(p.date)).map((p) => p.recipeId));
-    const pool = S.state.recipes.map((r) => matchRecipe(r, ctx())).filter((m) => ["ready", "subs", "short", "one"].includes(m.bucket) && !used.has(m.recipe.id) && m.recipe.category !== "breakfast" && m.recipe.category !== "dessert" && m.recipe.category !== "drink")
-      .sort((a, b) => b.score - a.score);
+    // Fill every empty meal of the week with a recipe of the right type, best kitchen matches first.
+    const pool = S.state.recipes.filter((r) => !r.noSuggest).map((r) => matchRecipe(r, ctx())).filter((m) => m.bucket !== "blocked").sort((a, b) => b.score - a.score);
     let n = 0;
-    for (const d of days) {
-      if (S.state.plan.some((p) => p.date === d && p.meal === "dinner")) continue;
-      const m = pool.shift();
-      if (!m) break;
-      S.state.plan.push({ id: uid(), date: d, meal: "dinner", recipeId: m.recipe.id, servings: m.recipe.servings || 2, done: false });
+    for (const d of days) for (const meal of planMeals()) {
+      if (S.state.plan.some((p) => p.date === d && p.meal === meal)) continue;
+      const fits = pool.filter((m) => !used.has(m.recipe.id) && slotFit(m.recipe, meal));
+      // Recipes that say they are for this meal ("Iftar", "Suhoor") go first, then the best kitchen match.
+      const m = fits.sort((a, b) => slotFit(b.recipe, meal) - slotFit(a.recipe, meal) || b.score - a.score)[0];
+      if (!m) continue;
+      used.add(m.recipe.id);
+      S.state.plan.push({ id: uid(), date: d, meal, recipeId: m.recipe.id, servings: m.recipe.servings || 2, done: false });
       n++;
     }
     save(); rr(); toast(n ? t("planned_n", { n }) : t("nothing_to_plan"));
@@ -94,7 +99,8 @@ export const planActions = {
 };
 
 function pickRecipe(date, meal, rr) {
-  const list = S.state.recipes.map((r) => ({ r, m: matchRecipe(r, ctx()) })).filter((x) => x.m.bucket !== "blocked").sort((a, b) => b.m.score - a.m.score);
+  // Recipes of the right type for this meal come first, then by how much of them is in the kitchen.
+  const list = S.state.recipes.map((r) => ({ r, m: matchRecipe(r, ctx()) })).filter((x) => x.m.bucket !== "blocked").sort((a, b) => slotFit(b.r, meal) - slotFit(a.r, meal) || b.m.score - a.m.score);
   const render = (q) => list.filter((x) => !q || x.r.title.toLowerCase().includes(q.toLowerCase())).slice(0, 60).map((x) => `<button class="pick-row" data-id="${x.r.id}">
     <strong>${h(x.r.title)}</strong>${availabilityLine(x.m)}</button>`).join("") || `<p class="meta">${h(t("no_results"))}</p>`;
   openSheet(t("add_meal_to", { m: t("meal_" + meal), d: dateLabel(date, { weekday: "long", day: "numeric", month: "short" }) }), `
@@ -131,7 +137,7 @@ export function viewGrocery() {
       <label class="round-check"><input type="checkbox" data-act="g-check" data-id="${it.id}" ${it.checked ? "checked" : ""} aria-label="${h(t("in_basket"))}"><span></span></label>
     </li>`;
   return `<div class="page page-narrow">
-    <header class="page-head"><h1>${h(t("grocery_list"))}</h1><a class="circle-btn" href="#/plan" aria-label="${h(t("open_planner"))}">${icon("calendar-days")}</a></header>
+    <header class="page-head"><h1>${h(t("grocery_list"))}</h1><div class="row"><button class="circle-btn" data-act="g-share" aria-label="${h(t("share_list"))}" title="${h(t("share_list"))}" ${g.some((x) => !x.checked) ? "" : "disabled"}>${icon("share-2")}</button><a class="circle-btn" href="#/plan" aria-label="${h(t("open_planner"))}">${icon("calendar-days")}</a></div></header>
     <section class="list-summary">
       <p class="eyebrow">${h(t("to_buy"))}</p>
       <div class="big">${h(tn("n_items_short", g.length - checked))}</div>
@@ -153,7 +159,34 @@ export function viewGrocery() {
       <button class="btn btn-primary" data-act="g-stock">${icon("refrigerator")} ${h(t("move_to_kitchen_n", { n: checked }))}</button></div>` : ""}
   </div>`;
 }
+/** The list as plain text, grouped by aisle: what is still to buy. */
+function groceryText() {
+  const left = S.state.grocery.filter((x) => !x.checked);
+  const groups = {};
+  for (const it of left) (groups[ingCategory(it)] ||= []).push(it);
+  const lines = [t("grocery_list") + ":"];
+  for (const c of CATEGORIES.filter((x) => groups[x])) {
+    lines.push("", catLabel(c));
+    for (const it of groups[c]) lines.push("• " + (it.ingredientId ? iname(it) : it.name) + (it.qty != null ? " — " + qty(it.qty, it.unit) : ""));
+  }
+  return lines.join("\n");
+}
 export const groceryActions = {
+  "g-share": () => {
+    const text = groceryText(), enc = encodeURIComponent(text);
+    openSheet(t("share_list"), `<pre class="share-text">${h(text)}</pre>
+      <div class="row wrap">
+        <a class="btn btn-primary" target="_blank" rel="noopener noreferrer" href="https://t.me/share/url?url=${enc}">${icon("send")} Telegram</a>
+        <a class="btn" target="_blank" rel="noopener noreferrer" href="https://wa.me/?text=${enc}">${icon("message-circle")} WhatsApp</a>
+        <button class="btn" data-copy>${icon("copy")} ${h(t("copy_list"))}</button>
+        ${navigator.share ? `<button class="btn" data-native>${icon("share-2")} ${h(t("share_other"))}</button>` : ""}
+      </div>`, {
+      onMount: (el) => {
+        el.querySelector("[data-copy]").onclick = async () => { try { await navigator.clipboard.writeText(text); toast(t("list_copied")); } catch { toast(t("copy_failed"), "error"); } };
+        el.querySelector("[data-native]")?.addEventListener("click", () => navigator.share({ text }).catch(() => {}));
+      },
+    });
+  },
   "g-by": (el, rr) => { gs.by = el.dataset.v; rr(); },
   "g-check": (el, rr) => { const it = S.state.grocery.find((x) => x.id === el.dataset.id); it.checked = !it.checked; save(); rr(); },
   "g-del": (el, rr) => { S.state.grocery = S.state.grocery.filter((x) => x.id !== el.dataset.id); save(); rr(); },

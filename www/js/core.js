@@ -2,7 +2,8 @@
 import { kvGet, kvSet, emptyState, uid, STATE_VERSION } from "./db.js";
 import { STR } from "./i18n.js";
 import { BY_ID, INGREDIENTS, CATEGORIES } from "./catalog.js";
-import { fmtQty, ingName, registerCustomName } from "./engine.js";
+import { fmtQty, ingName, registerCustomName, guessMeals, mealsOf, MEAL_TYPES, estimateEffort, recipeFacts, guessDish, guessCuisine, cuisineId, DISH_TYPES, CUISINES, resolveIngredient, recogniseTyped, norm, uzLatin, isUzbekCyrillic } from "./engine.js";
+import { latinizeRecipe } from "./parser.js";
 
 export const S = { state: emptyState() };
 /** Set by sync.js: run after every save, and whether the cloud AI proxy can be used. */
@@ -16,7 +17,32 @@ export async function loadState() {
   if (saved && saved.v) S.state = migrate(saved);
   for (const r of S.state.recipes) for (const i of r.ingredients) if (i.ingredientId && i.name) registerCustomName(i.name, i.ingredientId);
 }
+/** Every recipe gets its meal types (breakfast / lunch / dinner / …); recipes that already have them keep theirs. */
+export function ensureMeals(st = S.state) {
+  for (const r of st.recipes || []) {
+    // Uzbek Cyrillic -> Uzbek Latin, then give names the catalogue has learned since a second chance.
+    try { latinizeRecipe(r); } catch { /* leave the recipe as it is */ }
+    for (const i of r.ingredients || []) if (!i.ingredientId && i.name) { const id = resolveIngredient(i.name); if (id) { i.ingredientId = id; i.uncertain = false; if (i.qty != null && !i.unit) i.unit = "pc"; } }
+    if (!Array.isArray(r.meals) || !r.meals.length) { r.meals = guessMeals(r); r.category = r.meals[0]; }
+    estimateEffort(r);
+    if (!r.dish) r.dish = guessDish(r);
+    const cu = guessCuisine(r); if (cu) r.cuisine = cu; // known cuisines are stored by id; anything else stays as the person wrote it
+  }
+  // The same for what is in the kitchen.
+  let names = null;
+  for (const it of st.inventory || []) {
+    if (it.name && isUzbekCyrillic(it.name + " " + it.name)) it.name = uzLatin(it.name);
+    if (!it.ingredientId && it.name) {
+      // Items added earlier with a typing slip ("shpinach") are recognised now, the same way the Add form does it.
+      names ||= (() => { const m = new Map(); for (const r of st.recipes || []) for (const i of r.ingredients || []) if (!i.ingredientId && i.name) { const k = norm(i.name); if (k && k.length <= 40 && !m.has(k)) m.set(k, i.name); } return m; })();
+      const rec = recogniseTyped(it.name, names);
+      if (rec.id) { it.ingredientId = rec.id; it.category = BY_ID[rec.id]?.category || it.category; }
+      else if (rec.corrected) it.name = rec.name;
+    }
+  }
+}
 function migrate(st) {
+  ensureMeals(st);
   const base = emptyState();
   const out = { ...base, ...st, prefs: { ...base.prefs, ...st.prefs }, settings: { ...base.settings, ...st.settings } };
   out.v = STATE_VERSION;
@@ -36,7 +62,7 @@ export function applyTheme() {
   const root = document.documentElement;
   if (th === "system") delete root.dataset.theme; else root.dataset.theme = th;
   const dark = th === "dark" || (th === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", dark ? "#1E1914" : "#FAF6EF"));
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", dark ? "#0F1A13" : "#F5FAF0"));
   root.style.colorScheme = dark ? "dark" : "light";
 }
 export function isDark() { return document.documentElement.style.colorScheme === "dark"; }
@@ -105,7 +131,25 @@ export function defaultLocation(ingredientId) {
   if (["vegetables", "fruits"].includes(c)) return ["potato", "onion", "garlic", "red_onion", "sweet_potato", "pumpkin", "banana", "apple"].includes(ingredientId) ? "pantry" : "fridge";
   return "pantry";
 }
-export { CATEGORIES, BY_ID };
+export { CATEGORIES, BY_ID, guessMeals, mealsOf, MEAL_TYPES };
+/** The meals of a planned day: three meals, or suhoor and iftar while Ramadan mode is on. */
+export { recipeFacts, guessDish, guessCuisine, cuisineId, DISH_TYPES, CUISINES };
+/** "Uzbek" for a cuisine id, or the text as written when it is not one of the known cuisines. */
+export const cuisineLabel = (c) => (CUISINES.includes(c) ? t("cui_" + c) : c || "");
+export const dishLabel = (d) => (DISH_TYPES.includes(d) ? t("dish_" + d) : "");
+export const won = (n) => "₩" + (n >= 1000 ? Math.round(n / 100) * 100 : Math.round(n / 10) * 10).toLocaleString("en-US");
+/** Facts of a recipe for display, with the person's own prices. */
+export const factsOf = (r, servings) => recipeFacts(r, servings, S.state.prefs.prices || {});
+export const planMeals = () => (S.state.prefs.ramadan ? ["suhoor", "iftar"] : ["breakfast", "lunch", "dinner"]);
+/** Which recipe types suit a plan slot. */
+export const SLOT_TYPES = { breakfast: ["breakfast"], suhoor: ["breakfast"], lunch: ["lunch"], dinner: ["dinner"], iftar: ["dinner"] };
+/** How well a recipe suits a plan slot: 2 = the recipe itself says so (tag "Iftar"), 1 = its type fits, 0 = no. */
+export function slotFit(r, meal) {
+  if ((r.tags || []).some((x) => x.toLowerCase() === meal)) return 2;
+  return mealsOf(r).some((m) => (SLOT_TYPES[meal] || []).includes(m)) ? 1 : 0;
+}
+/** "Breakfast · Snack" */
+export const mealsLabel = (r) => mealsOf(r).map((m) => t("cat_" + m)).join(" · ");
 
 /* ---------- toast ---------- */
 export function toast(msg, kind = "info", action) {

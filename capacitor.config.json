@@ -2,5 +2,5 @@
   "appId": "com.kitchencompanion.app",
   "appName": "Kitchen Companion",
   "webDir": "www",
-  "android": { "backgroundColor": "#FAF6EF" }
+  "android": { "backgroundColor": "#F5FAF0" }
 }

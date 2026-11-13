@@ -3,8 +3,17 @@ import {
   S, t, h, icon, save, toast, openSheet, confirmDialog, qty, uid, ingredientDatalist, iname, catLabel,
   unitLabel, dateLabel, todayISO, addDays, LOCATIONS, defaultLocation, CATEGORIES, BY_ID, go, catIcon,
 } from "../core.js";
-import { resolveIngredient, expiryStatus, daysUntil, isLow, UNIT_LIST, ingCategory, keyOf } from "../engine.js";
+import { resolveIngredient, recogniseTyped, norm, expiryStatus, daysUntil, isLow, UNIT_LIST, ingCategory, keyOf } from "../engine.js";
 import { parseIngredientLine } from "../parser.js";
+
+/** Ingredient names that only recipes know (not in the ingredient list): normalised -> as the recipes write them. */
+function recipeNames() {
+  const m = new Map();
+  for (const r of S.state.recipes) for (const i of r.ingredients || []) if (!i.ingredientId && i.name) { const k = norm(i.name); if (k && k.length <= 40 && !m.has(k)) m.set(k, i.name); }
+  return m;
+}
+/** What a typed ingredient is: also forgives typing slips ("shpinach" -> spinach) and adopts the spelling recipes use. */
+const recognise = (text) => recogniseTyped(text, recipeNames());
 
 const kv = { loc: "all", cat: "all", q: "", filter: "" };
 const LOC_ICON = { fridge: "refrigerator", freezer: "snowflake", pantry: "package" };
@@ -181,8 +190,9 @@ function itemSheet(item, rr) {
     onMount: (el, close) => {
       const f = el.querySelector("form");
       const showMatch = () => {
-        const id = resolveIngredient(f.name.value);
-        el.querySelector("#inv-match").textContent = f.name.value ? (id ? t("matched_as", { x: BY_ID[id].names[S.state.prefs.lang] || BY_ID[id].names.en, c: catLabel(BY_ID[id].category) }) : t("not_in_catalog_note")) : "";
+        const rec = recognise(f.name.value);
+        const id = rec.id;
+        el.querySelector("#inv-match").textContent = f.name.value ? (id ? t("matched_as", { x: BY_ID[id].names[S.state.prefs.lang] || BY_ID[id].names.en, c: catLabel(BY_ID[id].category) }) : rec.corrected ? t("matched_recipe_name", { x: rec.name }) : t("not_in_catalog_note")) : "";
         if (id && !item) {
           if (!f.unit.value) f.unit.value = BY_ID[id].unit;
           const loc = defaultLocation(id);
@@ -200,9 +210,11 @@ function itemSheet(item, rr) {
       });
       f.onsubmit = (e) => {
         e.preventDefault();
-        const name = f.name.value.trim();
+        let name = f.name.value.trim();
         if (!name) return;
-        const id = resolveIngredient(name);
+        const rec = recognise(name);
+        const id = rec.id;
+        if (!id && rec.corrected) name = rec.name; // spell it the way the recipes do, so it matches them
         const num = (v) => { const n = parseFloat(String(v).replace(",", ".")); return isNaN(n) ? null : n; };
         const data = {
           name, ingredientId: id, qty: num(f.qty.value), unit: f.unit.value || (id ? BY_ID[id].unit : ""),
@@ -232,7 +244,11 @@ function quickAddSheet(rr) {
       const ta = el.querySelector("#qa-text");
       let items = [];
       const parse = () => {
-        items = ta.value.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).map(parseIngredientLine).filter(Boolean);
+        items = ta.value.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).map(parseIngredientLine).filter(Boolean).map((i) => {
+          if (i.ingredientId) return i;
+          const rec = recognise(i.name);
+          return rec.id ? { ...i, ingredientId: rec.id, uncertain: false, unit: i.unit || (i.qty != null ? "pc" : "") } : rec.corrected ? { ...i, name: rec.name } : i;
+        });
         el.querySelector("#qa-preview").innerHTML = items.length ? `<ul>${items.map((i) => `<li>${i.ingredientId ? icon("circle-check", "st-green") : icon("circle-help", "st-amber")} <strong>${h(i.ingredientId ? iname(i) : i.name)}</strong> ${h(qty(i.qty, i.unit))}${i.ingredientId ? "" : ` <span class="meta">(${h(t("not_in_catalog"))})</span>`}</li>`).join("")}</ul>` : "";
         el.querySelector("#qa-add").disabled = !items.length;
         import("../core.js").then((c) => c.refreshIcons(el));

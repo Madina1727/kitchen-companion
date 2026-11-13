@@ -1,6 +1,7 @@
 // Deterministic core: ingredient normalisation, unit conversion, recipe matching,
 // grocery lists and inventory deduction. No AI is used here.
 import { INGREDIENTS, BY_ID, ALLERGENS, DIETS, RESTRICTIONS, SUBSTITUTES } from "./catalog.js";
+import { FACTS, DENSITY, BUNCH } from "./nutri.js";
 
 /* ---------- units ---------- */
 export const UNITS = {
@@ -67,7 +68,7 @@ export function convert(qty, from, to, ingId) {
 
 /* ---------- ingredient normalisation ---------- */
 export function norm(s) {
-  return (s || "").toLowerCase().normalize("NFC").replace(/[‘’`ʻʼ]/g, "'").replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim();
+  return (s || "").toLowerCase().normalize("NFC").replace(/[‘’`ʻʼ]/g, "'").replace(/[ģğ]/g, "g'").replace(/[òóö]/g, "o'").replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim();
 }
 function singular(w) {
   if (/[^a-z]/.test(w) || w.length < 4) return w;
@@ -94,10 +95,16 @@ KO_NAMES.sort((a, b) => b[0].length - a[0].length);
 export function registerCustomName(name, id) { addName(name, id); }
 
 /** Map free text ("2 large brown onions") to a canonical id, or null. */
-export function resolveIngredient(text) {
+export function resolveIngredient(text, _noLatin = false) {
   const n = norm(text);
   if (!n) return null;
   if (NAME_INDEX.has(n)) return NAME_INDEX.get(n);
+  // "Pyure" on its own is mashed potato, so it is potato; "olma pyuresi" is whatever was mashed (apple).
+  const PUREE = /(^|\s)(pyure[a-z']*|puree|mashed|пюре|퓌레)(?=\s|$)/g;
+  if (PUREE.test(n)) {
+    const rest = n.replace(PUREE, " ").split(" ").filter((w) => w && !/^\d/.test(w) && !parseUnit(w) && !/^(kartoshka\w*|картоф\w*|potato(es)?|감자)$/.test(w)).join(" ");
+    return rest ? resolveIngredient(rest, _noLatin) : "potato";
+  }
   const toks = n.split(" ");
   const st = toks.map(singular);
   for (let len = Math.min(4, toks.length); len >= 1; len--) {
@@ -107,13 +114,128 @@ export function resolveIngredient(text) {
       if (NAME_INDEX.has(b)) return NAME_INDEX.get(b);
     }
   }
-  // Russian/Uzbek inflection: try matching word stems (first 5 letters).
+  // Uzbek endings: "sutni", "tuxumlar", "piyozdan", "go'shti" -> sut, tuxum, piyoz, go'sht.
+  for (let len = Math.min(3, toks.length); len >= 1; len--) {
+    for (let i = 0; i + len <= toks.length; i++) {
+      const head = toks.slice(i, i + len - 1), last = toks[i + len - 1];
+      if (!/^[a-z']+$/.test(last)) continue;
+      let w = last;
+      for (let round = 0; round < 2; round++) {
+        const m = w.match(/^(.{3,}?)(larni|lari|lar|ning|ini|ni|dan|ga|ka|qa|da|li|si|i)$/);
+        if (!m) break;
+        w = m[1];
+        const cand = [...head, w].join(" ");
+        if (NAME_INDEX.has(cand)) return NAME_INDEX.get(cand);
+      }
+    }
+  }
+
   for (const t of toks) {
     if (t.length < 5 || /[a-z]/.test(t)) continue;
     for (const [name, id] of NAME_INDEX) if (!name.includes(" ") && name.length >= 5 && name.slice(0, 5) === t.slice(0, 5)) return id;
   }
   for (const [name, id] of KO_NAMES) if (n.includes(name)) return id;
+  // Uzbek written in Cyrillic ("сут", "тухум", "пиёз"): read it as Latin Uzbek ("sut", "tuxum", "piyoz").
+  if (!_noLatin && /[а-яёўқғҳ]/i.test(n)) return resolveIngredient(uzLatin(text), true);
   return null;
+}
+
+/* ---------- typing mistakes: "shpinach" -> shpinat / spinach ---------- */
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1); // swapped letters
+      cur[j] = v;
+      if (v < best) best = v;
+    }
+    if (best > max) return max + 1;
+    prev2 = prev; prev = cur;
+  }
+  return prev[b.length];
+}
+/** Closest entry of `names` (normalised strings) to `word`, allowing 1 slip for short words and 2 for long ones. */
+function closest(word, names) {
+  const max = word.length >= 7 ? 2 : word.length >= 4 ? 1 : 0;
+  if (!max) return null;
+  const minLen = word.length === 4 ? 5 : 0; // a 4-letter word only matches a longer name it lost a letter from ("tuxm" -> tuxum)
+  let best = max + 1, hit = null, tie = false;
+  for (const name of names) {
+    if (name[0] !== word[0] || name.length < minLen || name.includes(" ") !== word.includes(" ")) continue;
+    const d = editDistance(word, name, Math.min(max, best));
+    if (d < best) { best = d; hit = name; tie = false; } else if (d === best && hit && d <= max) tie = name;
+  }
+  return hit && best <= max ? { name: hit, other: tie || null } : null;
+}
+/**
+ * For things a person types by hand (adding to the kitchen): the usual match first, then the nearest
+ * spelling in the ingredient list, then the nearest ingredient name that recipes use (`recipeNames`: normalised -> as written).
+ * Returns { id, name, corrected } — id is null for an ingredient that only recipes know.
+ */
+export function recogniseTyped(text, recipeNames = new Map()) {
+  const exact = resolveIngredient(text);
+  if (exact) return { id: exact, name: text, corrected: false };
+  const n = norm(text);
+  if (!n) return { id: null, name: text, corrected: false };
+  if (recipeNames.has(n)) return { id: null, name: recipeNames.get(n), corrected: false };
+  const tries = [n, ...(n.includes(" ") ? n.split(" ").filter((w) => w.length >= 5) : [])];
+  for (const w of tries) {
+    const c = closest(w, NAME_INDEX.keys());
+    if (c) {
+      const id = NAME_INDEX.get(c.name);
+      if (!c.other || NAME_INDEX.get(c.other) === id) return { id, name: text, corrected: true };
+    }
+  }
+  const c = closest(n, recipeNames.keys());
+  if (c && !c.other) return { id: null, name: recipeNames.get(c.name), corrected: true };
+  return { id: null, name: text, corrected: false };
+}
+
+/* ---------- Uzbek: Cyrillic -> Latin ---------- */
+const UZ_MAP = { а: "a", б: "b", в: "v", г: "g", д: "d", ж: "j", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "x", ч: "ch", ш: "sh", щ: "sh", ъ: "'", ы: "i", ь: "", э: "e", ю: "yu", я: "ya", ё: "yo", ў: "o'", қ: "q", ғ: "g'", ҳ: "h" };
+const UZ_VOWELS = "аеёиоуэюяўыАЕЁИОУЭЮЯЎЫ";
+const isCyr = (ch) => !!ch && /[а-яёўқғҳ]/i.test(ch);
+/** Uzbek Cyrillic text in the Latin alphabet (ў -> o', қ -> q, ғ -> g', ҳ -> h, ш -> sh, ч -> ch …). */
+export function uzLatin(text) {
+  if (!text || !/[а-яёўқғҳ]/i.test(text)) return text || "";
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], low = ch.toLowerCase(), prev = text[i - 1], next = text[i + 1];
+    let lat;
+    if (low === "е") lat = !isCyr(prev) || UZ_VOWELS.includes(prev) || "ъьЪЬ".includes(prev) ? "ye" : "e";
+    else if (low === "ц") lat = isCyr(prev) && UZ_VOWELS.includes(prev) ? "ts" : "s";
+    else if (low in UZ_MAP) lat = UZ_MAP[low];
+    else { out += ch; continue; }
+    if (ch !== low && lat) { // keep capitals: "Ч" -> "Ch", but "ЧУЧВАРА" -> "CHUCHVARA"
+      const allCaps = (isCyr(next) && next === next.toUpperCase() && next !== next.toLowerCase()) || (!isCyr(next) && isCyr(prev) && prev === prev.toUpperCase() && prev !== prev.toLowerCase());
+      lat = allCaps ? lat.toUpperCase() : lat.charAt(0).toUpperCase() + lat.slice(1);
+    }
+    out += lat;
+  }
+  return out;
+}
+// Words that exist only in Uzbek (nothing that is also a Russian word, such as "минут", "томат", "грамм").
+const UZ_WORDS = new Set("ва билан учун дона қошиқ кошик солиб қилиб килиб оламиз тайёр керак пиёз туз сут тухум ёғ гўшт гушт сабзи шакар сув мурч хамири хамирига ёки икки ярим пиёла кейин устига ичига солинади аралаштирамиз пишириб дақиқа дакика масаллиқлар масалликлар сариёғ сариёг қаймоқ каймок товуқ товук гуруч гурунч бодринг саримсоқ саримсок қалампир калампир тайёрланиши керакли ёрдамида қўшиб кушиб оловда қайнатиб кайнатиб таъбга кўра бўлади булади қиймаси киймаси пишлоқ пишлок қатиқ катик ёғи қизил кизил яшил ичида майда тўғраб тўғралган қовуриб ковуриб дамлаб кўкат ёғда сувда қиламиз соламиз бўлгач учун".split(" "));
+const RU_WORDS = new Set("и в на с для по до из не или соль соли мука муки молоко молока яйцо яйца яиц масло масла сахар сахара вода воды лук перец добавить добавьте перемешать перемешайте минут грамм ложка ложки ложек стакан вкусу тесто затем смешать смешайте нарезать нарежьте варить жарить мясо курица картофель морковь чеснок сливки сметана сыр что как это если при после чтобы через сверху готово подавать приготовления ингредиенты к у о от за же то так его их мы вы они она он".split(" "));
+/**
+ * True only when a text is Uzbek written in Cyrillic. Russian text is never touched:
+ * it needs clear Uzbek evidence (ў қ ғ ҳ or Uzbek-only words) that outweighs any Russian in it.
+ */
+export function isUzbekCyrillic(text) {
+  if (!text || !/[а-яёўқғҳ]/i.test(text)) return false;
+  const words = text.toLowerCase().match(/[а-яёўқғҳ]+/g) || [];
+  let uz = 0, ru = 0;
+  for (const w of words) {
+    if (/[ўқғҳ]/.test(w)) uz += 2;            // letters Russian does not have
+    else if (UZ_WORDS.has(w)) uz++;
+    else if (RU_WORDS.has(w) || /[ыщ]/.test(w) || /(ться|ете|ить|ать|ого|ому|ыми|ами|ний|ная|ное|ные|ый|ую)$/.test(w)) ru++; // Russian words and endings
+  }
+  return uz >= 2 && uz >= 2 * ru;
 }
 
 /** Stable key used to compare recipe and inventory items. */
@@ -345,4 +467,226 @@ export function fmtQty(n, locale = "en", unit) {
     if (rest < 0.04) return String(whole);
   }
   return new Intl.NumberFormat(locale, { maximumFractionDigits: n < 10 ? 2 : n < 100 ? 1 : 0 }).format(n);
+}
+
+/* ---------- meal types: a recipe can belong to one, two or three ---------- */
+export const MEAL_TYPES = ["breakfast", "lunch", "dinner", "dessert", "snack", "drink", "other"];
+// Words are matched as whole words or word beginnings (W…), so "средиземноморская" is not a "морс".
+const W = (words) => new RegExp("(?:^|\\s)(?:" + words + ")", "i");
+const WW = (words) => new RegExp("(?:^|\\s)(?:" + words + ")(?:\\s|$)", "i");
+const DRINK_RULES = [
+  [["drink", "breakfast", "snack"], W("смузи|smoothie|smuzi|шейк|shake|sheyk|milksheyk|milk sheyk|milkshake|милкшейк|мммилкшейк|스무디")],
+  [["drink"], W("напит|ichimlik|drink|коктейл|kokteyl|компот|kompot|juice|sharbat|лимонад|limonad|кисель|음료|주스")],
+  [["drink"], WW("сок|соки|чай|choy|морс|квас|айран|ayron|кефир")],
+  [["drink"], /^(кофе|coffee|латте|latte|капучино|kofe)(\s|$)/i],
+];
+const MEAL_RULES = [
+  // [types, words] — checked against the title, tags and book chapter.
+  ...DRINK_RULES,
+  [["breakfast", "snack"], W("гранол|granola|мюсли|muesli|бейгл|bagel|сэндвич|sandwich|sendvich|бутерброд|buterbrod|тост|toast|토스트|샌드위치")],
+  [["breakfast"], W("завтрак|nonushta|breakfast|омлет|omlet|omelet|яичниц|quymoq|шакшук|shakshuka|каша|каши|bo'tqa|porridge|овсян|oat|сырник|sirnik|оладь|oladi|aladushki|блин|blin|панкейк|pankeyk|panki|pancake|запеканк|запеченная овсянка|아침")],
+  [["lunch", "dinner"], W("суп|sho'rva|shorva|sho rva|soup|борщ|солянк|лагман|lag'mon|lagmon|плов|palov|plov|pilaf|сомса|чучвара|манти|шўрва|шурпа|крылышк|tabaka|табака|qurtoba|grenki|гренки|xasip|хасип|kotlet|манты|manti|пельмен|chuchvara|котлет|kotlet|мясо|мясн|go'sht|gosht|куриц|курин|tovuq|jo'ja|joja|bedana|chicken|рыб|baliq|fish|лосос|говядин|телятин|beef|свинин|индейк|баран|паста |pasta|спагетти|spaghetti|макарон|лапш|noodle|rice|гречк|пицц|pizza|pitsa|quiche|бургер|burger|шашлык|kabob|kabab|kebab|жарко|рагу|stew|dimlama|димлам|голубц|dolma|тефтел|гуляш|стейк|steak|карри|curry|салат|salat|salad|somsa|самса|хачапури|шаурм|лазань|lasagn|ризотто|risotto|фрикадел|qovurma|qovurdoq|norin|нарын|xonim|ханум|찌개|볶음|국수|덮밥|비빔|불고기|김치")],
+  [["lunch", "dinner"], WW("рис|киш|osh|паста|taom|taomi|taomlar|ovqat|garnir|гарнир")],
+  [["dessert"], W("десерт|desert|shirinlik|dessert|trayfl|trifle|pirojn|cheescake|эклер|ekler|бўғирсоқ|торт |торты|торта|tort |tortlar|cake|кекс|keks|пирожн|печень|cookie|pechene|морожен|muzqaymoq|ice cream|тарт|чизкейк|cheesecake|chizkeyk|cheezka|chizkeik|брауни|brownie|маффин|muffin|пудинг|pudding|мусс|желе|jelly|зефир|конфет|шоколадн|chocolate|shokoladli|топпинг|топинг|варень|джем|murabbo|халв|holva|пахлав|paxlava|медовик|наполеон|эклер|безе|меренг|суфле|панна|тирамису|штрудел|цукат|магкейк|кейк|крамбл|парфе|карамел|крем|пончик|donut|вафл|пряник|мармелад|батончик|케이크|디저트|쿠키")],
+  [["dessert"], WW("торт|tort")],
+  [["snack"], W("закуск|gazak|snack|перекус|батончик|чипс|крекер|хлебц|канапе|хумус|hummus|паштет|намазк|간식")],
+  [["breakfast", "snack"], W("хлеб|булочк|лепешк|лепёшк|багет|чиабатт|bread")],
+  [["breakfast", "snack"], WW("non|nonlar")],
+];
+// A dough or a base is a building block, not a meal.
+const BASE_ONLY = /(^|\s)(тесто|основа|dough|crust|xamir)(\s|$)/i;
+const SAVOURY = /мяс|куриц|курин|овощ|томат|сыр|капуст|рыб|лосос|гриб|картоф|индейк|шпинат|фет|бекон|ветчин|свекл|свёкл|козь|тунец|тунц|go'sht|tovuq|kartoshka|sabzavot|pishloq/i;
+const MAIN_CATS = new Set(["meat", "seafood", "pasta", "grains", "legumes"]);
+
+/** The meal types of a recipe, most fitting first (1 to 3). Uses what the recipe says, never changes a choice the user made. */
+export function mealsOf(r) {
+  if (Array.isArray(r?.meals) && r.meals.length) return r.meals;
+  return [MEAL_TYPES.includes(r?.category) ? r.category : "other"];
+}
+export function guessMeals(r, hints = []) {
+  const text = norm([r.title, ...(r.tags || [])].join(" "));
+  if (BASE_ONLY.test(norm(r.title || ""))) return ["other"];
+  // A whole book of drinks ("10 смузи"): every recipe in it is a drink, whatever its name.
+  for (const hint of hints) for (const [types, re] of DRINK_RULES) if (re.test(norm(hint))) return types.slice();
+  const found = [];
+  const add = (list) => { for (const m of list) if (!found.includes(m)) found.push(m); };
+  const pie = W("пирог|pirog|pie |тарт|tart").test(text + " ") && SAVOURY.test(text);
+  for (const [types, re] of MEAL_RULES) {
+    if (!re.test(text + " ")) continue;
+    if (pie && types[0] === "dessert") continue;
+    add(types);
+  }
+  if (pie) add(["lunch", "dinner"]);
+  else if (W("пирог|pirog").test(text)) add(["dessert"]);
+  // The saved category leads when it agrees with the words, or when it is a deliberate one ("dinner" is only the old default).
+  const cat = MEAL_TYPES.includes(r.category) && r.category !== "other" ? r.category : "";
+  if (cat && found.length && (found.includes(cat) || cat !== "dinner")) { if (found.includes(cat)) found.splice(found.indexOf(cat), 1); found.unshift(cat); }
+  if (!found.length && !cat) {
+    // No meal word in the name: the kind of dish still tells a lot ("xachapuri" is a savoury pastry, so lunch or dinner).
+    const kind = dishByRules(r);
+    const byKind = { soup: ["lunch", "dinner"], salad: ["lunch", "dinner"], pastry: ["lunch", "dinner"], side: ["lunch", "dinner"], dessert: ["dessert"], drink: ["drink"], bread: ["breakfast", "snack"], breakfast: ["breakfast"], snack: ["snack"], sauce: ["other"], preserve: ["other"] }[kind];
+    if (byKind) add(byKind);
+  }
+  if (!found.length) {
+    if (cat) add([cat]);
+    // Then the book or file name ("13 рецептов пиццы"), then what the recipe is made of.
+    if (!cat) for (const hint of hints) { for (const [types, re] of MEAL_RULES) if (re.test(norm(hint) + " ")) add(types); if (found.length) break; }
+    const cats = (r.ingredients || []).map((i) => BY_ID[i.ingredientId]?.category).filter(Boolean);
+    const sweet = (r.ingredients || []).some((i) => ["sugar", "honey", "cocoa", "chocolate", "vanilla", "sweetener"].includes(i.ingredientId));
+    if (cat === "dinner" || cat === "lunch") { if (cats.some((c) => MAIN_CATS.has(c)) || cats.includes("vegetables")) add(["lunch", "dinner"]); }
+    else if (!found.length) {
+      if (sweet) add(["dessert"]);
+      else if (cats.some((c) => MAIN_CATS.has(c)) || cats.includes("vegetables")) add(["lunch", "dinner"]);
+      else add(["other"]);
+    }
+  }
+  return found.slice(0, 3);
+}
+
+
+/* ---------- how long and how hard, when the recipe does not say ---------- */
+const HARD_WORDS = /xamir|хамир|тесто|dough|droj|дрожж|yeast|oshirma|qatlam|слоен|laminat|karamel|карамел|caramel|meringue|безе|меренг|temper|бисквит|biskvit|frityur|фритюр|deep.fry|marinad|маринов|tandir|тандыр|fermented|закваск/i;
+/**
+ * Fills in what is missing, marked as an estimate: time from the minutes written in the steps,
+ * difficulty from the number of ingredients and steps, the time and the techniques used.
+ */
+export function estimateEffort(r) {
+  const steps = r.steps || [], ings = (r.ingredients || []).filter((i) => i.essential !== false);
+  if (r.prepTime == null && r.cookTime == null) {
+    const secs = steps.reduce((n, s) => n + (s.timer || 0), 0);
+    if (secs >= 60) { r.cookTime = Math.round(secs / 60 + steps.length * 3); r.timeEst = true; } // the stated waits plus a few minutes of handling per step
+  }
+  if (!r.difficulty) {
+    const time = (r.prepTime || 0) + (r.cookTime || 0);
+    const text = [r.title, ...steps.map((s) => s.text)].join(" ");
+    let score = 0;
+    if (ings.length >= 14) score += 2; else if (ings.length >= 9) score += 1;
+    if (steps.length >= 9) score += 2; else if (steps.length >= 6) score += 1;
+    if (time >= 120) score += 2; else if (time >= 50) score += 1;
+    if (HARD_WORDS.test(text)) score += 1;
+    if (text.length > 1400) score += 1;
+    if (ings.length || steps.length) { r.difficulty = score >= 4 ? "hard" : score >= 2 ? "medium" : "easy"; r.difficultyEst = true; }
+  }
+  return r;
+}
+
+
+/* ---------- calories, protein and cost ---------- */
+/** Weight of one ingredient line in grams, or null when it cannot be worked out (no amount, unknown ingredient, "1 pack"). */
+export function gramsOf(i) {
+  const ing = BY_ID[i.ingredientId];
+  if (!ing || i.qty == null) return null;
+  const u = i.unit || ing.unit || "pc", d = UNITS[u];
+  if (!d) return null;
+  if (d.dim === "mass") return i.qty * d.f;
+  if (d.dim === "vol") return i.qty * d.f * (u === "pinch" ? 1 : DENSITY[ing.category] ?? 1);
+  if (u === "clove") return i.qty * (ing.id === "garlic" ? 5 : ing.gpp || 5);
+  if (u === "bunch") return i.qty * (BUNCH[ing.id] || 40);
+  if (u === "slice") return i.qty * 25;
+  if (u === "can") return i.qty * 400;
+  if (u === "pc") return ing.id === "garlic" ? i.qty * (/bosh|head|головк/i.test(i.note || "") ? 40 : 5) : ing.gpp ? i.qty * ing.gpp : null;
+  return null;
+}
+/**
+ * Calories, protein and cost of a recipe for `servings` portions (default: as written).
+ * Uses the figures the recipe states when it has them; otherwise adds up the ingredients (marked `est`).
+ * `prices`: the person's own prices in won per kg, by ingredient id. Returns null fields when too little is known.
+ */
+export function recipeFacts(r, servings, prices = {}) {
+  const base = r.servings || null;
+  const n = servings || base || 1;
+  const scale = base ? n / base : 1;
+  let kcal = 0, protein = 0, cost = 0, known = 0, counted = 0, priced = 0;
+  for (const i of r.ingredients || []) {
+    if (i.qty == null) continue;              // "to taste"
+    counted++;
+    const g = gramsOf(i), f = FACTS[i.ingredientId];
+    if (g == null || !f) continue;
+    known++;
+    kcal += (g / 100) * f[0]; protein += (g / 100) * f[1];
+    const price = prices[i.ingredientId] ?? f[2];
+    if (price != null) { cost += (g / 1000) * price; priced++; }
+  }
+  const enough = counted >= 2 && known / counted >= 0.6;
+  const out = { servings: n, hasServings: !!base, perServing: {}, total: {}, est: true, coverage: counted ? known / counted : 0 };
+  if (r.kcal != null) { out.perServing.kcal = r.kcal; out.perServing.protein = r.protein ?? null; out.total.kcal = r.kcal * n; out.total.protein = r.protein != null ? r.protein * n : null; out.est = !!r.nutritionEst; }
+  else if (enough) {
+    out.total.kcal = kcal * scale; out.total.protein = protein * scale;
+    if (base) { out.perServing.kcal = kcal / base; out.perServing.protein = protein / base; }
+  }
+  if (enough && priced) { out.total.cost = cost * scale; if (base) out.perServing.cost = cost / base; }
+  return out;
+}
+
+/* ---------- kind of dish and cuisine ---------- */
+export const DISH_TYPES = ["soup", "salad", "main", "side", "pastry", "bread", "breakfast", "dessert", "drink", "snack", "sauce", "preserve"];
+const DISH_RULES = [
+  ["preserve", W("qish uchun|qishga|konserva|tuzlama|tuzlangan|marinovka|на зиму|консерв|маринован|варень|murabbo|джем|jem |povidlo|kompot qish")],
+  ["sauce", W("sous|соус|sauce|zapravka|заправк|marinad|маринад|adjika|аджик|ziravor|приправ|dressing|ketchup|mayonez|pesto")],
+  ["drink", W("ichimlik|напит|drink|smuzi|смузи|smoothie|kokteyl|коктейл|kompot|компот|sharbat|limonad|лимонад|sheyk|шейк|shake|morс|морс|kvas|квас|ayron|айран|kisel|кисель|latte|латте|lassi|음료|주스|스무디")],
+  ["drink", WW("choy|чай|сок|kofe|кофе|kakao")],
+  ["soup", W("sho'rva|shorva|shurva|sho rva|шурпа|шўрва|суп|soup|борщ|borsh|mastava|мастава|xarcho|харчо|ramen|рамен|chorba|чорба|bulyon|бульон|moshxo'rda|okroshka|окрошк|solyanka|солянк|ugra osh|мохора|moxora|shi |щи |uxa|уха|lag'mon|lagmon|лагман|찌개|탕|국수|미역국")],
+  ["soup", WW("sup|supchik|щи|уха|국")],
+  ["salad", W("salat|салат|salad|vinegret|винегрет|achchiq chuchuk|achchiq-chuchuk|olivye|оливье|샐러드|무침")],
+  ["dessert", W("десерт|desert|shirinlik|dessert|торт |торты|tort |cake|кекс|keks|пирожн|pirojn|печень|pechenye|pechenka|cookie|морожен|muzqaymoq|чизкейк|chizkeyk|cheesecake|cheescake|брауни|brauni|brownie|маффин|maffin|muffin|пудинг|puding|мусс|желе|jele|зефир|zefir|конфет|konfet|шоколадн|shokoladli|варень|халв|holva|пахлав|paxlava|baklava|медовик|medovik|наполеон|napoleon|эклер|ekler|безе|меренг|суфле|панна|тирамису|tiramisu|штрудел|цукат|кейк|крамбл|парфе|карамел|karamel|крем|krem|пончик|ponchik|donut|вафл|vafli|пряник|мармелад|батончик|trayfl|rulet shirin|chak chak|чак-чак|бўғирсоқ|bo'g'irsoq|케이크|디저트|쿠키")],
+  ["dessert", WW("торт|tort")],
+  ["pastry", W("somsa|сомса|самса|pirog|пирог|pitsa|пицц|pizza|xachapuri|хачапури|borek|бурек|lahmajun|лахмаджун|pide|пиде|cheburek|чебурек|belyash|беляш|pirojki|пирожк|kish |киш |quiche|tart|тарт|gumma|гумма|xonim|ханум|qatlama|катлама|blinchik|блинчик|манты|manti|чучвара|chuchvara|пельмен|pelmen|xinkali|хинкали|vareniki|вареник|단팥|만두")],
+  ["bread", W("xleb|хлеб|bread|bulochka|булочк|lepeshka|лепешк|лепёшк|lavash|лаваш|baget|багет|patir|патир|bagel|бейгл")],
+  ["bread", WW("non|nonlar")],
+  ["breakfast", W("omlet|омлет|omelet|quymoq|яичниц|shakshuka|шакшук|kasha|каша|каши|bo'tqa|porridge|ovsyanka|овсян|sirnik|сырник|pankeyk|панкейк|pancake|oladi|оладь|granola|гранол|menemen|toast|тост|nonushta|завтрак")],
+  ["snack", W("gazak|закуск|zakuska|snack|перекус|sendvich|сэндвич|sandwich|buterbrod|бутерброд|chips|чипс|kanape|канапе|xumus|хумус|hummus|rulet|рулет|naggets|наггетс|간식")],
+  ["side", W("garnir|гарнир|pyure|пюре|side dish")],
+];
+/** One kind of dish for a recipe ("soup", "salad", …), from its title, tags and meal types. */
+function dishByRules(r) {
+  const text = norm([r.title, ...(r.tags || [])].join(" ")) + " ";
+  const title = norm(r.title || "") + " ";
+  for (const [type, re] of DISH_RULES) if (re.test(title)) return type;
+  for (const [type, re] of DISH_RULES) if (re.test(text)) return type;
+  return null;
+}
+export function guessDish(r) {
+  const byRule = dishByRules(r);
+  if (byRule) return byRule;
+  const m = mealsOf(r);
+  if (m.includes("lunch") || m.includes("dinner")) return "main";
+  return m.includes("dessert") ? "dessert" : m.includes("drink") ? "drink" : m.includes("snack") ? "snack" : m.includes("breakfast") ? "breakfast" : "main";
+}
+export const CUISINES = ["uzbek", "russian", "korean", "italian", "turkish", "caucasian", "asian", "european", "american", "japanese", "chinese", "french", "mexican", "indian", "arabic"];
+// How a cuisine is written by people and by books -> its id.
+const CUISINE_NAMES = [
+  ["uzbek", /o'zbek|ozbek|uzbek|узбек|우즈벡|우즈베크/i], ["russian", /^rus|russian|русск|росси|러시아/i], ["korean", /kore|корей|한식|한국/i], ["italian", /ital|итал|이탈리아/i],
+  ["turkish", /turk|турец|турк|터키/i], ["caucasian", /kavkaz|кавказ|코카서스|gruzin|грузин|georgian|caucas|armyan|армян|ozarbayjon|azerbaijan|азербайдж/i], ["asian", /osiyo|^asia|азиат|아시아/i],
+  ["european", /yevropa|europe|европ|유럽/i], ["american", /amerika|american|америк|미국/i], ["japanese", /yapon|japan|япон|일본|일식/i], ["chinese", /xitoy|chin|китай|중국|중식/i],
+  ["french", /fransuz|french|франц|프랑스/i], ["mexican", /meksika|mexic|мексик|멕시코/i], ["indian", /hind|india|инди|인도/i], ["arabic", /arab|араб|아랍/i],
+];
+export function cuisineId(text) {
+  const t = norm(text || "");
+  if (!t) return "";
+  if (CUISINES.includes(t)) return t;
+  for (const [id, re] of CUISINE_NAMES) if (re.test(t)) return id;
+  return "";
+}
+const CUISINE_DISHES = [
+  ["uzbek", W("palov|плов|plov|osh |somsa|сомса|самса|manti|манты|lag'mon|lagmon|лагман|norin|нарын|sho'rva|shurva|шурпа|dimlama|димлам|tandir|тандыр|chuchvara|чучвара|mastava|мастава|qozon kabob|казан кебаб|xonim|ханум|moshxo'rda|qatlama|patir|achchiq chuchuk|naryn|shivit oshi|moxora|bo'g'irsoq|holvaytar|nisholda|sumalak|qazi|hasip|xasip|uzbekcha|o'zbekcha|по-узбекски|jiz|tuxum barak")],
+  ["korean", W("kimchi|кимчи|koreyscha|koreyskiy|по-корейски|bulgogi|пулькоги|bibimbap|пибимпап|kimbap|кимпап|tteok|ток-покки|tokpokki|ramyon|рамён|chapche|чапче|japchae|kuksi|кукси|morkovcha|김치|불고기|비빔밥|떡볶이|된장")],
+  ["italian", W("pasta|паста |spagetti|спагетти|pitsa|пицц|pizza|lazanya|лазань|rizotto|ризотто|tiramisu|тирамису|panna kotta|панна|bolonez|болоньез|karbonara|карбонара|pesto|песто|fettuchine|ravioli|равиоли|bruschetta|брускетт|focaccia|фокачч|italyancha")],
+  ["turkish", W("turkcha|turkiya|по-турецки|турецк|lahmajun|лахмаджун|pide|пиде|baklava|пахлава|iskandar|искандер|menemen|менемен|chorba|чорба|borek|бурек|kunafa|кюнефе|sudjuk|merjimek|mercimek|simit|gozleme|гёзлеме|doner|донер|sach tava|kofte")],
+  ["russian", W("borsh|борщ|pelmen|пельмен|blini|блины|blinchik|olivye|оливье|sirnik|сырник|vinegret|винегрет|solyanka|солянк|okroshka|окрошк|shi |щи |golubtsi|голубц|kotlet po|бефстроганов|befstroganov|vareniki|вареник|kulebyaka|kasha|pirojki|пирожк|селедка под шубой|shuba|medovik|медовик|syrniki|zapekanka|запеканк")],
+  ["caucasian", W("xachapuri|хачапури|xinkali|хинкали|lobio|лобио|chaxoxbili|чахохбили|xarcho|харчо|gruzincha|по-грузински|achma|ачма|adjika|аджик|satsivi|сациви|ajapsandali|аджапсандал|lyulya|люля|dolma|долма|shashlik|шашлык|chanaxi|чанахи|tkemali|ткемали|pxali|пхали|kutab|кутаб|dushbara")],
+  ["japanese", W("sushi|суши|roll |роллы|teriyaki|терияки|miso|мисо|tempura|темпур|udon|удон|onigiri|онигири|ramen|рамен|мочи|mochi|doreyaki|dorayaki")],
+  ["chinese", W("xitoycha|по-китайски|kung pao|гунбао|doubanjiang|wok|вок|chow mein|dim sum|mapo|baozi|баоцзы")],
+  ["american", W("burger|бургер|chizkeyk|чизкейк|cheesecake|brauni|брауни|brownie|pankeyk|панкейк|pancake|donut|пончик|hot dog|хот-дог|naggets|наггетс|maffin|маффин|muffin|sinnabon|синнабон|cinnabon|mac and cheese|klab sendvich")],
+  ["french", W("ekler|эклер|kruassan|круассан|croissant|kish |киш |quiche|ratatuy|рататуй|krem bryule|крем-брюле|sufle|суфле|beshamel|бешамель|fondan|фондан|makaron |макарон |tart taten|крок-месье|луковый суп")],
+  ["mexican", W("tako|тако|taco|burrito|буррито|kesadilya|кесадиль|quesadilla|guakamole|гуакамоле|nachos|начос|fahitas|фахитас")],
+  ["indian", W("karri|карри|curry|masala|масала|biryani|бирьяни|tandoori|тандури|dal |дал |naan|наан|samosa")],
+  ["arabic", W("xumus|хумус|hummus|falafel|фалафель|shaverma|шаурма|shaurma|tabule|табуле|kuskus|кускус|baba ganush|mandi|kabsa")],
+];
+/** A cuisine id for a recipe: what it says, else what the dish is known as; "" when there is no clue. */
+export function guessCuisine(r) {
+  const own = cuisineId(r.cuisine);
+  if (own) return own;
+  const text = norm([r.title, ...(r.tags || [])].join(" ")) + " ";
+  for (const [id, re] of CUISINE_DISHES) if (re.test(text)) return id;
+  return "";
 }

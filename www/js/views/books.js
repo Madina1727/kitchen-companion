@@ -3,7 +3,7 @@
 import { S, t, h, icon, save, toast, go, uid, confirmDialog, openSheet, dateLabel, refreshIcons, aiAvailable } from "../core.js";
 import { fileSet, fileGet, fileDel } from "../db.js";
 import { extractBookPart, fixPosts, aiErrorKey, costOf, PRICES } from "../ai.js";
-import { extractPdf, findRecipes } from "../parser.js";
+import { extractPdf, findRecipes, attachPdfPhotos } from "../parser.js";
 import { norm } from "../engine.js";
 import { makeItem } from "./importer.js";
 
@@ -367,7 +367,14 @@ async function runLocal(book, job) {
   const all = await bookText(book, (done) => { book.localDone = done; notify(); });
   if (job.stop) return;
   const pages = all.filter((p) => p.page >= book.from && p.page <= book.to);
-  const found = findRecipes(pages);
+  const found = findRecipes(pages, { title: book.title });
+  if (book.usePhotos !== false && found.some((r) => r.photoBox)) {
+    // Cut each dish photo out of its page.
+    const f = await fileGet(book.fileIds[0]);
+    book.photoDone = 0; book.photoTotal = found.filter((r) => r.photoBox).length;
+    await attachPdfPhotos(await f.blob.arrayBuffer(), found, (done) => { book.photoDone = done; notify(); });
+    if (job.stop) return;
+  }
   const seen = new Set();
   for (const r of found) {
     r._src = { type: "book", bookId: book.id, fileId: book.fileIds[0], fileName: book.title, page: r.sourcePage };
@@ -523,7 +530,7 @@ export function viewBook(id) {
             ${[["claude-opus-5-5", "Claude Opus 5.5"], ["claude-sonnet-5-5", "Claude Sonnet 5.5"], ["claude-haiku-5-5", "Claude Haiku 5.5"]].map(([v, l]) => `<option value="${v}" ${b.model === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         </div>
         <p class="meta">${h(t("page_range_help"))}</p>
-        <label class="opt"><input type="checkbox" name="usePhotos" ${b.usePhotos ? "checked" : ""} ${b.mode === "ai" ? "" : "disabled"}><span>${h(t("book_use_photos"))}<small>${h(t("book_use_photos_sub"))}</small></span></label>
+        <label class="opt"><input type="checkbox" name="usePhotos" ${b.usePhotos ? "checked" : ""}><span>${h(t("book_use_photos"))}<small>${h(t("book_use_photos_sub"))}</small></span></label>
         <div id="book-est">${estimateHtml(b)}</div>
         <div class="row-between">
           <button type="button" class="btn btn-danger-ghost" data-act="book-delete" data-id="${b.id}">${icon("trash-2")} ${h(t("delete_book"))}</button>
